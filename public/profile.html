@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Profile · Dark Horses</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="wrap" style="max-width: 560px;">
+    <header class="top">
+      <div class="brand">
+        <div id="avatar" class="avatar"></div>
+        <div>
+          <h1 id="hello">Your profile</h1>
+          <p class="muted" id="emailLine"></p>
+        </div>
+      </div>
+      <div class="row">
+        <a class="btn btn-gray" href="/index.html">Home</a>
+        <button id="logoutBtn" class="btn-outline" type="button">Log out</button>
+      </div>
+    </header>
+
+    <div class="card">
+      <p class="muted">This is what the draft will show next to your picks. Seniority is used only when two people rank the same slot the same.</p>
+      <label for="fullName">Full name</label>
+      <input id="fullName" type="text" autocomplete="name" />
+      <label for="phone">Phone</label>
+      <input id="phone" type="tel" inputmode="tel" placeholder="+1 512..." />
+      <label for="seniority">Seniority (years at Dark Horses)</label>
+      <input id="seniority" type="number" min="0" max="50" step="1" />
+      <div class="actions">
+        <button id="saveBtn" class="btn-primary" type="button">Save profile</button>
+      </div>
+      <div id="msg"></div>
+    </div>
+  </div>
+  <footer>Dark Horses · profile</footer>
+
+  <script type="module">
+    import { firebaseReady } from "/firebase.js";
+    import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+    import { doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+    function avatarFromName(name) {
+      const safe = (name || "User").trim() || "User";
+      const initials = safe.split(/\s+/).map((p) => p[0]?.toUpperCase() || "").slice(0, 2).join("") || "U";
+      const hash = safe.split("").reduce((acc, ch) => ch.charCodeAt(0) + ((acc << 5) - acc), 0);
+      return { initials, color: `hsl(${Math.abs(hash) % 360}, 62%, 42%)` };
+    }
+
+    function setAvatar(name) {
+      const av = avatarFromName(name);
+      const el = document.getElementById("avatar");
+      el.textContent = av.initials;
+      el.style.background = av.color;
+    }
+
+    function show(msg, kind) {
+      document.getElementById("msg").innerHTML = `<div class="flash ${kind}">${msg}</div>`;
+    }
+
+    const { ready, auth, db } = await firebaseReady;
+    if (!ready) {
+      document.body.insertAdjacentHTML("afterbegin", '<div class="flash err">Firebase is not connected. Open the deployed site.</div>');
+      throw new Error("firebase not ready");
+    }
+
+    let uid = null;
+
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) return location.replace("/index.html");
+      uid = user.uid;
+      const snap = await getDoc(doc(db, "users", uid));
+      if (!snap.exists()) return location.replace("/index.html");
+      const d = snap.data();
+      document.getElementById("fullName").value = d.fullName || "";
+      document.getElementById("phone").value = d.phone || "";
+      document.getElementById("seniority").value = d.seniority ?? 0;
+      document.getElementById("hello").textContent = d.fullName || "Your profile";
+      document.getElementById("emailLine").textContent = d.email || user.email || "";
+      setAvatar(d.fullName || d.email || "U");
+    });
+
+    document.getElementById("saveBtn").onclick = async () => {
+      const fullName = document.getElementById("fullName").value.trim();
+      const phone = document.getElementById("phone").value.trim();
+      const seniority = Number(document.getElementById("seniority").value);
+      if (!fullName) return show("Name is required.", "err");
+      if (!uid) return show("Not signed in.", "err");
+      try {
+        await updateDoc(doc(db, "users", uid), {
+          fullName,
+          phone,
+          seniority: Number.isFinite(seniority) ? seniority : 0
+        });
+        document.getElementById("hello").textContent = fullName;
+        setAvatar(fullName);
+        show("Profile saved.", "ok");
+      } catch (err) {
+        show(err.message || "Could not save.", "err");
+      }
+    };
+
+    document.getElementById("logoutBtn").onclick = async () => {
+      await signOut(auth);
+      location.href = "/index.html";
+    };
+  </script>
+</body>
+</html>

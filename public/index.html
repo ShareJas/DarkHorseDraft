@@ -10,29 +10,23 @@
   <div class="wrap" style="max-width: 520px;">
     <header class="top">
       <div class="brand">
-        <h1>Dark Horses Shift Draft</h1>
+        <h1>Dark Horses Draft Fall 2026</h1>
       </div>
     </header>
 
     <p class="muted" style="margin-bottom: 16px;">
-      Staff accounts for the weekly Door / Food / Dish draft.
+      Login Page.
     </p>
-
-    <div id="configBanner" class="flash warn" hidden>
-      Firebase is not connected yet. Deploy this site with Hosting, or paste the web app keys into
-      <code>public/firebase.js</code>.
-    </div>
 
     <div id="guestView">
       <div class="card">
         <h2>Create account</h2>
-        <p class="muted">Use a real email. You will log in with this later.</p>
         <label for="regName">Full name</label>
-        <input id="regName" type="text" autocomplete="name" placeholder="Jane Doe" />
+        <input id="regName" type="text" autocomplete="name" placeholder="Nathan Deolloz" />
         <label for="regEmail">Email</label>
-        <input id="regEmail" type="email" autocomplete="email" />
+        <input id="regEmail" type="email" autocomplete="email" placeholder="jeevacation@gmail.com" />
         <label for="regPhone">Phone</label>
-        <input id="regPhone" type="tel" inputmode="tel" placeholder="+1 512..." />
+        <input id="regPhone" type="tel" inputmode="tel" placeholder="5128675309" />
         <label for="regPassword">Password (at least 6 characters)</label>
         <input id="regPassword" type="password" autocomplete="new-password" />
         <div class="actions">
@@ -55,7 +49,7 @@
     <div id="signedInView" hidden></div>
     <div id="status"></div>
   </div>
-  <footer>Dark Horses · registration</footer>
+  <footer>Created by Jason Sharer. Head waiter 2025-2027</footer>
 
   <script type="module">
     import { firebaseReady } from "/firebase.js";
@@ -79,7 +73,6 @@
       if (code.includes("invalid-credential") || code.includes("wrong-password") || code.includes("user-not-found")) {
         return "Email or password is wrong.";
       }
-      if (code.includes("too-many-requests")) return "Too many attempts. Wait a minute and try again.";
       if (code.includes("operation-not-allowed")) {
         return "Email/Password sign-in is not enabled. Turn it on in Firebase Console → Authentication.";
       }
@@ -116,8 +109,9 @@
           <h2>You're in</h2>
           <p><strong>${data.fullName || email}</strong></p>
           <p class="muted">${email}</p>
-          <p class="muted">Account saved. Profile and questionnaire pages come next — this page only proves Auth + Firestore work.</p>
+          <p class="muted">Account saved. Next, setup your profile</p>
           <div class="actions">
+            <a class="btn btn-primary" href="/profile.html">Continue to profile</a>
             <button id="logoutBtn" class="btn-outline" type="button">Log out</button>
           </div>
         </div>
