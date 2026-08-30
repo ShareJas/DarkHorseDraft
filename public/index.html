@@ -1,89 +1,188 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Welcome to Firebase Hosting</title>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dark Horses Shift Draft</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="wrap" style="max-width: 520px;">
+    <header class="top">
+      <div class="brand">
+        <h1>Dark Horses Shift Draft</h1>
+      </div>
+    </header>
 
-    <!-- update the version number as needed -->
-    <script defer src="/__/firebase/12.18.0/firebase-app-compat.js"></script>
-    <!-- include only the Firebase features as you need -->
-    <script defer src="/__/firebase/12.18.0/firebase-auth-compat.js"></script>
-    <script defer src="/__/firebase/12.18.0/firebase-database-compat.js"></script>
-    <script defer src="/__/firebase/12.18.0/firebase-firestore-compat.js"></script>
-    <script defer src="/__/firebase/12.18.0/firebase-functions-compat.js"></script>
-    <script defer src="/__/firebase/12.18.0/firebase-messaging-compat.js"></script>
-    <script defer src="/__/firebase/12.18.0/firebase-storage-compat.js"></script>
-    <script defer src="/__/firebase/12.18.0/firebase-analytics-compat.js"></script>
-    <script defer src="/__/firebase/12.18.0/firebase-remote-config-compat.js"></script>
-    <script defer src="/__/firebase/12.18.0/firebase-performance-compat.js"></script>
-    <!-- 
-      initialize the SDK after all desired features are loaded, set useEmulator to false
-      to avoid connecting the SDK to running emulators.
-    -->
-    <script defer src="/__/firebase/init.js?useEmulator=true"></script>
+    <p class="muted" style="margin-bottom: 16px;">
+      Staff accounts for the weekly Door / Food / Dish draft.
+    </p>
 
-    <style media="screen">
-      body { background: #ECEFF1; color: rgba(0,0,0,0.87); font-family: Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; }
-      #message { background: white; max-width: 360px; margin: 100px auto 16px; padding: 32px 24px; border-radius: 3px; }
-      #message h2 { color: #ffa100; font-weight: bold; font-size: 16px; margin: 0 0 8px; }
-      #message h1 { font-size: 22px; font-weight: 300; color: rgba(0,0,0,0.6); margin: 0 0 16px;}
-      #message p { line-height: 140%; margin: 16px 0 24px; font-size: 14px; }
-      #message a { display: block; text-align: center; background: #039be5; text-transform: uppercase; text-decoration: none; color: white; padding: 16px; border-radius: 4px; }
-      #message, #message a { box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); }
-      #load { color: rgba(0,0,0,0.4); text-align: center; font-size: 13px; }
-      @media (max-width: 600px) {
-        body, #message { margin-top: 0; background: white; box-shadow: none; }
-        body { border-top: 16px solid #ffa100; }
-      }
-    </style>
-  </head>
-  <body>
-    <div id="message">
-      <h2>Welcome</h2>
-      <h1>Firebase Hosting Setup Complete</h1>
-      <p>You're seeing this because you've successfully setup Firebase Hosting. Now it's time to go build something extraordinary!</p>
-      <a target="_blank" href="https://firebase.google.com/docs/hosting/">Open Hosting Documentation</a>
+    <div id="configBanner" class="flash warn" hidden>
+      Firebase is not connected yet. Deploy this site with Hosting, or paste the web app keys into
+      <code>public/firebase.js</code>.
     </div>
-    <p id="load">Firebase SDK Loading&hellip;</p>
 
-    <script>
-      document.addEventListener('DOMContentLoaded', function() {
-        const loadEl = document.querySelector('#load');
-        // // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
-        // // The Firebase SDK is initialized and available here!
-        //
-        // firebase.auth().onAuthStateChanged(user => { });
-        // firebase.database().ref('/path/to/ref').on('value', snapshot => { });
-        // firebase.firestore().doc('/foo/bar').get().then(() => { });
-        // firebase.functions().httpsCallable('yourFunction')().then(() => { });
-        // firebase.messaging().requestPermission().then(() => { });
-        // firebase.storage().ref('/path/to/ref').getDownloadURL().then(() => { });
-        // firebase.analytics(); // call to activate
-        // firebase.analytics().logEvent('tutorial_completed');
-        // firebase.performance(); // call to activate
-        //
-        // // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
+    <div id="guestView">
+      <div class="card">
+        <h2>Create account</h2>
+        <p class="muted">Use a real email. You will log in with this later.</p>
+        <label for="regName">Full name</label>
+        <input id="regName" type="text" autocomplete="name" placeholder="Jane Doe" />
+        <label for="regEmail">Email</label>
+        <input id="regEmail" type="email" autocomplete="email" />
+        <label for="regPhone">Phone</label>
+        <input id="regPhone" type="tel" inputmode="tel" placeholder="+1 512..." />
+        <label for="regPassword">Password (at least 6 characters)</label>
+        <input id="regPassword" type="password" autocomplete="new-password" />
+        <div class="actions">
+          <button id="registerBtn" class="btn-primary" type="button">Register</button>
+        </div>
+      </div>
 
-        try {
-          let app = firebase.app();
-          let features = [
-            'auth', 
-            'database', 
-            'firestore',
-            'functions',
-            'messaging', 
-            'storage', 
-            'analytics', 
-            'remoteConfig',
-            'performance',
-          ].filter(feature => typeof app[feature] === 'function');
-          loadEl.textContent = `Firebase SDK loaded with ${features.join(', ')}`;
-        } catch (e) {
-          console.error(e);
-          loadEl.textContent = 'Error loading the Firebase SDK, check the console.';
+      <div class="card">
+        <h2>Log in</h2>
+        <label for="loginEmail">Email</label>
+        <input id="loginEmail" type="email" autocomplete="email" />
+        <label for="loginPassword">Password</label>
+        <input id="loginPassword" type="password" autocomplete="current-password" />
+        <div class="actions">
+          <button id="loginBtn" class="btn-green" type="button">Log in</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="signedInView" hidden></div>
+    <div id="status"></div>
+  </div>
+  <footer>Dark Horses · registration</footer>
+
+  <script type="module">
+    import { firebaseReady } from "/firebase.js";
+    import {
+      createUserWithEmailAndPassword,
+      signInWithEmailAndPassword,
+      onAuthStateChanged,
+      signOut
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+    import { doc, setDoc, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+    const statusEl = document.getElementById("status");
+    const guestView = document.getElementById("guestView");
+    const signedInView = document.getElementById("signedInView");
+
+    function friendlyError(err) {
+      const code = err?.code || "";
+      if (code.includes("email-already-in-use")) return "That email already has an account. Log in instead.";
+      if (code.includes("invalid-email")) return "That email does not look valid.";
+      if (code.includes("weak-password")) return "Password must be at least 6 characters.";
+      if (code.includes("invalid-credential") || code.includes("wrong-password") || code.includes("user-not-found")) {
+        return "Email or password is wrong.";
+      }
+      if (code.includes("too-many-requests")) return "Too many attempts. Wait a minute and try again.";
+      if (code.includes("operation-not-allowed")) {
+        return "Email/Password sign-in is not enabled. Turn it on in Firebase Console → Authentication.";
+      }
+      return err.message || "Something went wrong.";
+    }
+
+    function showStatus(message, kind) {
+      statusEl.innerHTML = message
+        ? `<div class="flash ${kind || "ok"}">${message}</div>`
+        : "";
+    }
+
+    function emptyUserDoc({ email, phone, fullName }) {
+      return {
+        email,
+        phone: phone || "",
+        fullName: fullName || "",
+        seniority: 0,
+        availability: {},
+        prefs: {},
+        picks: [],
+        done: false,
+        approved: true,
+        isAdmin: false,
+        createdAt: serverTimestamp()
+      };
+    }
+
+    function renderSignedIn(data, email) {
+      guestView.hidden = true;
+      signedInView.hidden = false;
+      signedInView.innerHTML = `
+        <div class="card">
+          <h2>You're in</h2>
+          <p><strong>${data.fullName || email}</strong></p>
+          <p class="muted">${email}</p>
+          <p class="muted">Account saved. Profile and questionnaire pages come next — this page only proves Auth + Firestore work.</p>
+          <div class="actions">
+            <button id="logoutBtn" class="btn-outline" type="button">Log out</button>
+          </div>
+        </div>
+      `;
+      document.getElementById("logoutBtn").onclick = () => signOut(auth);
+    }
+
+    const boot = await firebaseReady;
+    const { ready, auth, db } = boot;
+
+    if (!ready) {
+      document.getElementById("configBanner").hidden = false;
+    }
+
+    document.getElementById("registerBtn").onclick = async () => {
+      if (!ready) return showStatus("Firebase is not connected yet.", "err");
+      const fullName = document.getElementById("regName").value.trim();
+      const email = document.getElementById("regEmail").value.trim();
+      const phone = document.getElementById("regPhone").value.trim();
+      const password = document.getElementById("regPassword").value;
+      if (!email || password.length < 6) {
+        return showStatus("Email and a password of at least 6 characters are required.", "err");
+      }
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        await setDoc(doc(db, "users", cred.user.uid), emptyUserDoc({ email, phone, fullName }));
+        showStatus("Account created.", "ok");
+      } catch (err) {
+        showStatus(friendlyError(err), "err");
+      }
+    };
+
+    document.getElementById("loginBtn").onclick = async () => {
+      if (!ready) return showStatus("Firebase is not connected yet.", "err");
+      const email = document.getElementById("loginEmail").value.trim();
+      const password = document.getElementById("loginPassword").value;
+      if (!email || !password) return showStatus("Enter email and password.", "err");
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+      } catch (err) {
+        showStatus(friendlyError(err), "err");
+      }
+    };
+
+    if (ready) {
+      onAuthStateChanged(auth, async (user) => {
+        if (!user) {
+          guestView.hidden = false;
+          signedInView.hidden = true;
+          signedInView.innerHTML = "";
+          return;
         }
+        const ref = doc(db, "users", user.uid);
+        let snap = await getDoc(ref);
+        if (!snap.exists()) {
+          await setDoc(ref, emptyUserDoc({
+            email: user.email || "",
+            phone: "",
+            fullName: ""
+          }));
+          snap = await getDoc(ref);
+        }
+        renderSignedIn(snap.data() || {}, user.email);
       });
-    </script>
-  </body>
+    }
+  </script>
+</body>
 </html>
