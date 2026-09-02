@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Draft · Dark Horses</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="wrap wrap-wide">
+    <header class="top">
+      <div class="brand">
+        <div id="avatar" class="avatar"></div>
+        <div>
+          <h1 id="hello">Draft board</h1>
+          <p class="muted" id="meta"></p>
+        </div>
+      </div>
+      <div class="row">
+        <a class="btn btn-gray" href="/questionnaire.html">Questionnaire</a>
+        <a class="btn btn-gray" href="/profile.html">Profile</a>
+        <a id="adminLink" class="btn btn-amber" href="/admin.html" hidden>Admin</a>
+        <button id="logoutBtn" class="btn-outline" type="button">Log out</button>
+      </div>
+    </header>
+
+    <div id="lockBanner" class="flash warn" hidden>Draft is locked.</div>
+
+    <div class="card">
+      <h2>Your next blocks</h2>
+      <p class="muted">Pick only when you are #1 in that block. Ranking neighbors 1 and 2 is how you bid for a double.</p>
+      <div id="nextUp" class="row"></div>
+    </div>
+
+    <div class="card">
+      <h2>Master calendar</h2>
+      <div style="overflow-x:auto">
+        <table class="cal" id="master"></table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Your picks</h2>
+      <ul id="myPicks"></ul>
+    </div>
+  </div>
+
+  <div id="modal" class="modal-bg">
+    <div class="modal">
+      <h2>Pick a station</h2>
+      <p id="modalSlot" class="muted"></p>
+      <div id="modalList"></div>
+      <div class="actions">
+        <button id="passBtn" class="btn-gray" type="button">Pass (end of line)</button>
+        <button id="closeModal" class="btn-outline" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+  <footer>Dark Horses · draft</footer>
+
+  <script type="module">
+    import { firebaseReady } from "/firebase.js";
+    import {
+      timeslots, timeBuckets, days, shiftTypes, generateAvatar,
+      timeslotDocId, roleFromType, MAX_PICKS, MAX_PER_TYPE
+    } from "/data.js";
+    import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+    import {
+      doc, getDoc, collection, getDocs, runTransaction, updateDoc
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+    const { ready, auth, db } = await firebaseReady;
+    if (!ready) throw new Error("firebase not ready");
+
+    let uid = null;
+    let me = {};
+    let names = {};
+    let activeSlot = null;
+
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) return location.replace("/index.html");
+      uid = user.uid;
+      const snap = await getDoc(doc(db, "users", uid));
+      if (!snap.exists()) return location.replace("/index.html");
+      me = { uid, ...snap.data() };
+      const av = generateAvatar(me.fullName || me.email || "U");
+      const el = document.getElementById("avatar");
+      el.textContent = av.initials;
+      el.style.background = av.color;
+      document.getElementById("hello").textContent = me.fullName || "Draft";
+      if (me.isAdmin) document.getElementById("adminLink").hidden = false;
+
+      const settings = await getDoc(doc(db, "settings", "global"));
+      if (settings.data()?.draftLocked && !me.isAdmin) {
+        document.getElementById("lockBanner").hidden = false;
+        return;
+      }
+      await loadNames();
+      await refresh();
+    });
+
+    async function loadNames() {
+      const snap = await getDocs(collection(db, "users"));
+      snap.forEach((d) => { names[d.id] = d.data().fullName || d.data().email || d.id; });
+    }
+
+    async function refresh() {
+      const meSnap = await getDoc(doc(db, "users", uid));
+      me = { uid, ...meSnap.data() };
+      const picks = me.picks || [];
+      document.getElementById("meta").textContent = `${picks.length}/${MAX_PICKS} picks · max ${MAX_PER_TYPE} per Door / Food / Dish`;
+      document.getElementById("myPicks").innerHTML = picks.length
+        ? picks.map((p) => `<li>${p}</li>`).join("")
+        : "<li class='muted'>None yet</li>";
+
+      const shiftsSnap = await getDocs(collection(db, "shifts"));
+      const tsSnap = await getDocs(collection(db, "timeslots"));
+      const shiftMap = {};
+      shiftsSnap.forEach((d) => {
+        const s = d.data();
+        const [day, time] = String(s.timeBucket || "").split(" ");
+        if (!shiftMap[time]) shiftMap[time] = {};
+        if (!shiftMap[time][day]) shiftMap[time][day] = [];
+        shiftMap[time][day].push({ id: d.id, ...s });
+      });
+      const queues = {};
+      tsSnap.forEach((d) => { queues[d.data().bucket] = d.data().queue || []; });
+
+      const mine = [];
+      Object.entries(queues).forEach(([bucket, queue]) => {
+        const pos = queue.findIndex((q) => q.userId === uid);
+        if (pos >= 0 && pos < 5) mine.push({ bucket, pos: pos + 1 });
+      });
+      mine.sort((a, b) => a.pos - b.pos || timeslots.indexOf(a.bucket) - timeslots.indexOf(b.bucket));
+      const next = document.getElementById("nextUp");
+      next.innerHTML = "";
+      if (!mine.length) next.innerHTML = '<p class="muted">You are not in the top 5 of any block. Admin may still need to start the draft.</p>';
+      mine.forEach((m) => {
+        const btn = document.createElement("button");
+        btn.className = m.pos === 1 ? "btn-primary" : "btn-gray";
+        btn.textContent = `${m.pos === 1 ? "Pick" : "#" + m.pos} · ${m.bucket}`;
+        btn.disabled = m.pos !== 1 || picks.length >= MAX_PICKS;
+        btn.onclick = () => openModal(m.bucket);
+        next.appendChild(btn);
+      });
+
+      let html = "<thead><tr><th>Time</th>" + days.map((d) => `<th>${d}</th>`).join("") + "</tr></thead><tbody>";
+      timeBuckets.forEach((time) => {
+        html += `<tr><td><strong>${time}</strong></td>`;
+        days.forEach((day) => {
+          const slot = `${day} ${time}`;
+          if (!timeslots.includes(slot)) {
+            html += "<td class='muted'>—</td>";
+            return;
+          }
+          const list = shiftMap[time]?.[day] || [];
+          let cell = "<table class='sub'>";
+          list.forEach((s) => {
+            const who = s.pickedBy ? (names[s.pickedBy] || s.pickedBy) : "Open";
+            const cls = s.pickedBy === uid ? "mine" : (s.pickedBy ? "taken" : "open");
+            cell += `<tr class="${cls}"><td>${s.type}</td><td>${who}</td></tr>`;
+          });
+          const q = (queues[slot] || []).slice(0, 4);
+          cell += "<tr><td colspan='2'>";
+          q.forEach((p) => {
+            const av = generateAvatar(p.name || p.userId);
+            cell += `<span class="queue-chip" title="${p.name || ""}" style="background:${av.color}">${av.initials}</span>`;
+          });
+          cell += "</td></tr></table>";
+          html += `<td>${cell}</td>`;
+        });
+        html += "</tr>";
+      });
+      document.getElementById("master").innerHTML = html + "</tbody>";
+    }
+
+    function openModal(slot) {
+      activeSlot = slot;
+      document.getElementById("modalSlot").textContent = slot;
+      document.getElementById("modal").classList.add("show");
+      fillModal();
+    }
+
+    async function fillModal() {
+      const time = activeSlot.split(" ")[1];
+      const types = shiftTypes[time] || [];
+      const snap = await getDocs(collection(db, "shifts"));
+      const list = document.getElementById("modalList");
+      list.innerHTML = "";
+      types.forEach((type) => {
+        const row = snap.docs.find((d) => d.data().shiftName === `${activeSlot} ${type}`);
+        const div = document.createElement("div");
+        if (row && !row.data().pickedBy) {
+          div.className = "list-item";
+          div.textContent = `${type} — open`;
+          div.onclick = () => pick(row.id);
+        } else {
+          div.className = "list-item off";
+          div.textContent = `${type} — taken`;
+        }
+        list.appendChild(div);
+      });
+    }
+
+    async function pick(shiftId) {
+      try {
+        await runTransaction(db, async (tx) => {
+          const shiftRef = doc(db, "shifts", shiftId);
+          const userRef = doc(db, "users", uid);
+          const tsRef = doc(db, "timeslots", timeslotDocId(activeSlot));
+          const [shiftSnap, userSnap, tsSnap] = await Promise.all([
+            tx.get(shiftRef), tx.get(userRef), tx.get(tsRef)
+          ]);
+          if (!shiftSnap.exists()) throw new Error("Shifts are missing. Admin: Initialize shifts.");
+          if (!tsSnap.exists()) throw new Error("Queues missing. Admin: Start draft.");
+          const shift = shiftSnap.data();
+          const user = userSnap.data();
+          const queue = tsSnap.data().queue || [];
+          if (shift.pickedBy) throw new Error("Already taken.");
+          if ((user.picks || []).length >= MAX_PICKS) throw new Error(`Max ${MAX_PICKS} picks.`);
+          const role = roleFromType(shift.type);
+          const count = (user.picks || []).filter((p) => roleFromType(p) === role).length;
+          if (count >= MAX_PER_TYPE) throw new Error(`Max ${MAX_PER_TYPE} ${role} shifts.`);
+          if ((user.picks || []).some((p) => p.includes(activeSlot))) throw new Error("You already have this block.");
+          if (queue[0]?.userId !== uid) throw new Error("Not your turn in this block.");
+          const picks = [...(user.picks || []), shift.shiftName];
+          tx.update(shiftRef, { pickedBy: uid });
+          tx.update(userRef, { picks, done: picks.length >= MAX_PICKS });
+          tx.update(tsRef, { queue: queue.slice(1) });
+        });
+
+        const userSnap = await getDoc(doc(db, "users", uid));
+        if ((userSnap.data().picks || []).length >= MAX_PICKS) {
+          const all = await getDocs(collection(db, "timeslots"));
+          for (const t of all.docs) {
+            const q = (t.data().queue || []).filter((x) => x.userId !== uid);
+            await updateDoc(t.ref, { queue: q });
+          }
+        }
+        document.getElementById("modal").classList.remove("show");
+        await refresh();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    document.getElementById("passBtn").onclick = async () => {
+      if (!activeSlot || !confirm("Pass this block? You go to the end of its line.")) return;
+      try {
+        await runTransaction(db, async (tx) => {
+          const tsRef = doc(db, "timeslots", timeslotDocId(activeSlot));
+          const snap = await tx.get(tsRef);
+          const queue = snap.data()?.queue || [];
+          if (queue[0]?.userId !== uid) throw new Error("Not your turn.");
+          const first = queue.shift();
+          queue.push(first);
+          tx.update(tsRef, { queue });
+        });
+        document.getElementById("modal").classList.remove("show");
+        await refresh();
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+
+    document.getElementById("closeModal").onclick = () => document.getElementById("modal").classList.remove("show");
+    document.getElementById("logoutBtn").onclick = async () => {
+      await signOut(auth);
+      location.href = "/index.html";
+    };
+  </script>
+</body>
+</html>
