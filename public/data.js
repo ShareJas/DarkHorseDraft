@@ -1,6 +1,6 @@
-// Overlap = station start (4-digit code) + 60 minutes.
-// 1800-1900 is the only 4-station box: Door, Food, Dish, Floater.
-// 1700-1800 is Door + 1715 Dish only.
+// 1700-1800: Door, 1700 Food, 1715 Dish.
+// 1800-1900: Door, Food, 1815 Dish, Floater (4 people).
+// Only 0900 Food appears in two boxes.
 
 export const timeslots = [
   "Mon 0730-0830", "Mon 0830-0930", "Mon 0930-1030", "Mon 1030-1130", "Mon 1100-1200", "Mon 1200-1300", "Mon 1300-1400", "Mon 1700-1800", "Mon 1800-1900",
@@ -25,7 +25,7 @@ export const shiftTypes = {
   "1100-1200": ["1100 Door", "1100 Food", "1130 Dish"],
   "1200-1300": ["1200 Door", "1200 Food", "1230 Dish"],
   "1300-1400": ["1300 Door", "1300 Food", "1330 Dish"],
-  "1700-1800": ["1700 Door", "1715 Dish"],
+  "1700-1800": ["1700 Door", "1700 Food", "1715 Dish"],
   "1800-1900": ["1800 Door", "1800 Food", "1815 Dish", "1800 Floater"]
 };
 
@@ -46,7 +46,9 @@ export function roleFromType(type) {
 
 export function bucketsForShift(shift) {
   const home = shift.timeBucket || shift.homeBucket;
-  return [home, ...(shift.alsoBuckets || [])].filter(Boolean);
+  const isNineFood = String(shift.type || shift.shiftName || "").includes("0900 Food");
+  const extra = isNineFood ? (shift.alsoBuckets || []) : [];
+  return [home, ...extra].filter(Boolean);
 }
 
 export function shiftTouchesSlot(shift, slot) {

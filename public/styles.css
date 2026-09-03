@@ -1,5 +1,4 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
-
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   font-family: Inter, system-ui, sans-serif;
@@ -12,11 +11,6 @@ body.draft-page {
     #eef2f6;
 }
 body.draft-page .card { background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%); }
-body.draft-page .cal tr.breakfast > td { background: #eff6ff; }
-body.draft-page .cal tr.lunch > td { background: #f0fdf4; }
-body.draft-page .cal tr.dinner > td,
-body.draft-page .cal tr.evening > td { background: #fff7ed; }
-
 .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 80px; }
 .wrap-wide { max-width: 1280px; }
 header.top {
@@ -65,9 +59,11 @@ th { background: #f1f5f9; }
 .cal thead th { border-bottom: 2px solid #1e293b; }
 .cal td:first-child, .cal th:first-child { border-right: 2px solid #1e293b; }
 .cal td:nth-child(n+2), .cal th:nth-child(n+2) { border-left: 2px solid #475569; }
-.cal tr.breakfast > td { background: #eff6ff; }
-.cal tr.lunch > td { background: #f0fdf4; }
-.cal tr.dinner > td, .cal tr.evening > td { background: #fff7ed; border-top: 3px solid #9a3412; }
+.cal tbody tr:nth-child(-n+4) > td, .cal tr.breakfast > td { background: #dbeafe; }
+.cal tbody tr:nth-child(n+5):nth-child(-n+7) > td, .cal tr.lunch > td { background: #dcfce7; }
+.cal tbody tr:nth-child(n+8) > td, .cal tr.dinner > td, .cal tr.evening > td {
+  background: #ffedd5; border-top: 3px solid #9a3412;
+}
 .sub { width: 100%; font-size: 0.78rem; }
 .sub td { border: 0; border-top: 1px solid #cbd5e1; text-align: left; background: #fff; color: #12202b; }
 .cal .sub tr.open td { background: #fff; color: #12202b; }
