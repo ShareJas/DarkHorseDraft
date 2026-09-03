@@ -6,7 +6,7 @@
   <title>Draft · Dark Horses</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
-<body>
+<body class="draft-page">
   <div class="wrap wrap-wide">
     <header class="top">
       <div class="brand">
@@ -23,28 +23,26 @@
         <button id="logoutBtn" class="btn-outline" type="button">Log out</button>
       </div>
     </header>
-
     <div id="lockBanner" class="flash warn" hidden>Draft is locked.</div>
-
     <div class="card">
       <h2>You're up</h2>
-      <p class="muted">Only blocks where you are first in line. Place in line for everyone else is the chips on the calendar.</p>
+      <p class="muted">Only blocks where you are first and a station is still open.</p>
       <div id="nextUp" class="row"></div>
     </div>
-
     <div class="card">
       <h2>Master calendar</h2>
-      <div style="overflow-x:auto">
-        <table class="cal" id="master"></table>
-      </div>
+      <div style="overflow-x:auto"><table class="cal" id="master"></table></div>
     </div>
-
     <div class="card">
       <h2>Your picks</h2>
-      <ul id="myPicks"></ul>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Station</th><th>Block</th><th></th></tr></thead>
+          <tbody id="myPicks"></tbody>
+        </table>
+      </div>
     </div>
   </div>
-
   <div id="modal" class="modal-bg">
     <div class="modal">
       <h2>Pick a station</h2>
@@ -57,26 +55,19 @@
     </div>
   </div>
   <footer>Dark Horses · draft</footer>
-
   <script type="module">
     import { firebaseReady } from "/firebase.js";
     import {
-      timeslots, timeBuckets, days, generateAvatar,
-      timeslotDocId, roleFromType, bucketsForShift, shiftTouchesSlot,
-      MAX_PICKS, MAX_PER_TYPE
+      timeslots, timeBuckets, days, generateAvatar, timeslotDocId, roleFromType,
+      bucketsForShift, shiftTouchesSlot, findShiftByName, shiftsOverlap, MAX_PICKS, MAX_PER_TYPE
     } from "/data.js";
     import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-    import {
-      doc, getDoc, collection, getDocs, runTransaction, updateDoc
-    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+    import { doc, getDoc, collection, getDocs, runTransaction, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
     const { ready, auth, db } = await firebaseReady;
     if (!ready) throw new Error("firebase not ready");
-
-    let uid = null;
-    let me = {};
-    let names = {};
-    let activeSlot = null;
+    let uid = null, me = {}, names = {}, activeSlot = null;
+    const adminish = (v) => v === true || String(v).toLowerCase() === "true";
 
     onAuthStateChanged(auth, async (user) => {
       if (!user) return location.replace("/index.html");
@@ -86,40 +77,46 @@
       me = { uid, ...snap.data() };
       const av = generateAvatar(me.fullName || me.email || "U");
       const el = document.getElementById("avatar");
-      el.textContent = av.initials;
-      el.style.background = av.color;
+      el.textContent = av.initials; el.style.background = av.color;
       document.getElementById("hello").textContent = me.fullName || "Draft";
-      if (me.isAdmin === true || String(me.isAdmin).toLowerCase() === "true") {
-        document.getElementById("adminLink").hidden = false;
-      }
+      if (adminish(me.isAdmin)) document.getElementById("adminLink").hidden = false;
       const settings = await getDoc(doc(db, "settings", "global"));
-      if (settings.data()?.draftLocked && !(me.isAdmin === true || String(me.isAdmin).toLowerCase() === "true")) {
-        document.getElementById("lockBanner").hidden = false;
-        return;
+      if (settings.data()?.draftLocked && !adminish(me.isAdmin)) {
+        document.getElementById("lockBanner").hidden = false; return;
       }
-      await loadNames();
-      await refresh();
+      await loadNames(); await refresh();
     });
 
     async function loadNames() {
       const snap = await getDocs(collection(db, "users"));
       snap.forEach((d) => { names[d.id] = d.data().fullName || d.data().email || d.id; });
     }
+    function entryFor(user) {
+      return { userId: user.uid || uid, name: user.fullName || user.email || uid };
+    }
 
     async function refresh() {
       const meSnap = await getDoc(doc(db, "users", uid));
       me = { uid, ...meSnap.data() };
       const picks = me.picks || [];
-      document.getElementById("meta").textContent = `${picks.length}/${MAX_PICKS} picks · max ${MAX_PER_TYPE} per Door / Food / Dish`;
+      document.getElementById("meta").textContent = `${picks.length}/${MAX_PICKS} picks · max ${MAX_PER_TYPE} per type`;
       document.getElementById("myPicks").innerHTML = picks.length
-        ? picks.map((p) => `<li>${p}</li>`).join("")
-        : "<li class='muted'>None yet</li>";
+        ? picks.map((p) => {
+            const known = findShiftByName(p);
+            return `<tr><td>${p}</td><td>${known ? known.timeBucket : p}</td><td><button type="button" class="btn-red" data-release="${p}">Release</button></td></tr>`;
+          }).join("")
+        : `<tr><td colspan="3" class="muted">None yet</td></tr>`;
+      document.querySelectorAll("[data-release]").forEach((btn) => {
+        btn.onclick = () => releaseShift(btn.getAttribute("data-release"));
+      });
 
       const shiftsSnap = await getDocs(collection(db, "shifts"));
       const tsSnap = await getDocs(collection(db, "timeslots"));
       const shiftMap = {};
+      const allShiftRows = [];
       shiftsSnap.forEach((d) => {
         const s = { id: d.id, ...d.data() };
+        allShiftRows.push(s);
         bucketsForShift(s).forEach((bucket) => {
           const [day, time] = String(bucket).split(" ");
           if (!time || !day) return;
@@ -133,22 +130,19 @@
 
       const mine = [];
       Object.entries(queues).forEach(([bucket, queue]) => {
-        if (queue.findIndex((q) => q.userId === uid) === 0) mine.push({ bucket });
+        if (queue.findIndex((q) => q.userId === uid) !== 0) return;
+        const openHere = allShiftRows.some((s) => !s.pickedBy && shiftTouchesSlot(s, bucket) && !shiftsOverlap(s, picks));
+        if (openHere) mine.push({ bucket });
       });
       mine.sort((a, b) => timeslots.indexOf(a.bucket) - timeslots.indexOf(b.bucket));
-      const next = document.getElementById("nextUp");
-      next.innerHTML = "";
+      const next = document.getElementById("nextUp"); next.innerHTML = "";
       if (!mine.length) {
-        next.innerHTML = picks.length >= MAX_PICKS
-          ? '<p class="muted">You already have 4 picks.</p>'
-          : '<p class="muted">You are not first in any block right now.</p>';
+        next.innerHTML = picks.length >= MAX_PICKS ? '<p class="muted">You already have 4 picks.</p>' : '<p class="muted">You are not first in any open block.</p>';
       }
       mine.forEach((m) => {
         const btn = document.createElement("button");
-        btn.className = "btn-primary";
-        btn.textContent = `Pick ${m.bucket}`;
-        btn.disabled = picks.length >= MAX_PICKS;
-        btn.onclick = () => openModal(m.bucket);
+        btn.className = "btn-primary"; btn.textContent = `Pick ${m.bucket}`;
+        btn.disabled = picks.length >= MAX_PICKS; btn.onclick = () => openModal(m.bucket);
         next.appendChild(btn);
       });
 
@@ -166,14 +160,12 @@
             const cls = s.pickedBy === uid ? "mine" : (s.pickedBy ? "taken" : "open");
             cell += `<tr class="${cls}"><td>${s.type}</td><td>${who}</td></tr>`;
           });
-          const q = (queues[slot] || []).slice(0, 4);
           cell += "<tr><td colspan='2'>";
-          q.forEach((p) => {
+          (queues[slot] || []).slice(0, 4).forEach((p) => {
             const av = generateAvatar(p.name || p.userId);
             cell += `<span class="queue-chip" title="${p.name || ""}" style="background:${av.color}">${av.initials}</span>`;
           });
-          cell += "</td></tr></table>";
-          html += `<td>${cell}</td>`;
+          cell += "</td></tr></table>"; html += `<td>${cell}</td>`;
         });
         html += "</tr>";
       });
@@ -189,25 +181,16 @@
 
     async function fillModal() {
       const snap = await getDocs(collection(db, "shifts"));
-      const list = document.getElementById("modalList");
-      list.innerHTML = "";
-      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((s) => shiftTouchesSlot(s, activeSlot));
-      if (!rows.length) {
-        list.innerHTML = '<p class="muted">No stations in this block. Admin: Initialize shifts.</p>';
-        return;
-      }
+      const myPicks = (await getDoc(doc(db, "users", uid))).data()?.picks || [];
+      const list = document.getElementById("modalList"); list.innerHTML = "";
+      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+        .filter((s) => shiftTouchesSlot(s, activeSlot) && !s.pickedBy && !shiftsOverlap(s, myPicks));
+      if (!rows.length) { list.innerHTML = '<p class="muted">No open stations left in this block.</p>'; return; }
       rows.forEach((row) => {
         const btn = document.createElement("button");
-        btn.type = "button";
-        if (!row.pickedBy) {
-          btn.className = "btn-primary pick-choice";
-          btn.textContent = row.type === "0900 Food" ? "0900 Food (8:30 or 9:30 block)" : row.type;
-          btn.onclick = () => pick(row.id);
-        } else {
-          btn.className = "btn-gray pick-choice";
-          btn.disabled = true;
-          btn.textContent = `${row.type} — taken`;
-        }
+        btn.type = "button"; btn.className = "btn-primary pick-choice";
+        btn.textContent = row.type === "0900 Food" ? "0900 Food (covers 8:30 and 9:30)" : row.type;
+        btn.onclick = () => pick(row.id);
         list.appendChild(btn);
       });
     }
@@ -217,27 +200,33 @@
         await runTransaction(db, async (tx) => {
           const shiftRef = doc(db, "shifts", shiftId);
           const userRef = doc(db, "users", uid);
-          const tsRef = doc(db, "timeslots", timeslotDocId(activeSlot));
-          const [shiftSnap, userSnap, tsSnap] = await Promise.all([tx.get(shiftRef), tx.get(userRef), tx.get(tsRef)]);
+          const shiftSnap = await tx.get(shiftRef);
+          const userSnap = await tx.get(userRef);
           if (!shiftSnap.exists()) throw new Error("Shifts are missing. Admin: Initialize shifts.");
-          if (!tsSnap.exists()) throw new Error("Queues missing. Admin: Start draft.");
-          const shift = shiftSnap.data();
-          const user = userSnap.data();
-          const queue = tsSnap.data().queue || [];
+          const shift = { id: shiftSnap.id, ...shiftSnap.data() };
+          const user = userSnap.data() || {};
+          const buckets = bucketsForShift(findShiftByName(shift.shiftName) || shift);
+          const tsRefs = buckets.map((b) => doc(db, "timeslots", timeslotDocId(b)));
+          const tsSnaps = [];
+          for (const ref of tsRefs) tsSnaps.push(await tx.get(ref));
           if (shift.pickedBy) throw new Error("Already taken.");
           if ((user.picks || []).length >= MAX_PICKS) throw new Error(`Max ${MAX_PICKS} picks.`);
           const role = roleFromType(shift.type);
           const count = (user.picks || []).filter((p) => roleFromType(p) === role).length;
           if (count >= MAX_PER_TYPE) throw new Error(`Max ${MAX_PER_TYPE} ${role} shifts.`);
-          const claimed = bucketsForShift(shift);
-          if ((user.picks || []).some((p) => claimed.some((b) => p.includes(b)))) {
+          if (shiftsOverlap(findShiftByName(shift.shiftName) || shift, user.picks || [])) {
             throw new Error("That station overlaps a block you already picked.");
           }
-          if (queue[0]?.userId !== uid) throw new Error("Not your turn in this block.");
+          const activeRef = doc(db, "timeslots", timeslotDocId(activeSlot));
+          const activeSnap = tsSnaps.find((s) => s.id === activeRef.id);
+          if ((activeSnap?.data()?.queue || [])[0]?.userId !== uid) throw new Error("Not your turn in this block.");
           const picks = [...(user.picks || []), shift.shiftName];
           tx.update(shiftRef, { pickedBy: uid });
           tx.update(userRef, { picks, done: picks.length >= MAX_PICKS });
-          tx.update(tsRef, { queue: queue.slice(1) });
+          tsSnaps.forEach((snap, i) => {
+            if (!snap.exists()) return;
+            tx.update(tsRefs[i], { queue: (snap.data().queue || []).filter((x) => x.userId !== uid) });
+          });
         });
         const userSnap = await getDoc(doc(db, "users", uid));
         if ((userSnap.data().picks || []).length >= MAX_PICKS) {
@@ -248,9 +237,42 @@
         }
         document.getElementById("modal").classList.remove("show");
         await refresh();
-      } catch (err) {
-        alert(err.message);
-      }
+      } catch (err) { alert(err.message); }
+    }
+
+    async function releaseShift(shiftName) {
+      if (!confirm(`Release ${shiftName}? You return to 2nd in that line.`)) return;
+      try {
+        const known = findShiftByName(shiftName);
+        const shiftId = known?.id || shiftName.replace(/\s+/g, "_");
+        await runTransaction(db, async (tx) => {
+          const shiftRef = doc(db, "shifts", shiftId);
+          const userRef = doc(db, "users", uid);
+          const shiftSnap = await tx.get(shiftRef);
+          const userSnap = await tx.get(userRef);
+          if (!shiftSnap.exists()) throw new Error("Could not find that shift. Re-initialize shifts.");
+          const shift = { id: shiftSnap.id, ...shiftSnap.data() };
+          if (shift.pickedBy && shift.pickedBy !== uid) throw new Error("That station is not yours.");
+          const user = userSnap.data() || {};
+          const buckets = bucketsForShift(known || shift);
+          const tsRefs = buckets.map((b) => doc(db, "timeslots", timeslotDocId(b)));
+          const tsSnaps = [];
+          for (const ref of tsRefs) tsSnaps.push(await tx.get(ref));
+          tx.update(shiftRef, { pickedBy: null });
+          tx.update(userRef, {
+            picks: (user.picks || []).filter((p) => p !== shiftName && p !== shift.shiftName),
+            done: false
+          });
+          const meEntry = entryFor(user);
+          tsSnaps.forEach((snap, i) => {
+            if (!snap.exists()) return;
+            const queue = (snap.data().queue || []).filter((x) => x.userId !== uid);
+            queue.splice(Math.min(1, queue.length), 0, meEntry);
+            tx.update(tsRefs[i], { queue });
+          });
+        });
+        await refresh();
+      } catch (err) { alert(err.message); }
     }
 
     document.getElementById("passBtn").onclick = async () => {
@@ -261,22 +283,15 @@
           const snap = await tx.get(tsRef);
           const queue = snap.data()?.queue || [];
           if (queue[0]?.userId !== uid) throw new Error("Not your turn.");
-          const first = queue.shift();
-          queue.push(first);
+          const first = queue.shift(); queue.push(first);
           tx.update(tsRef, { queue });
         });
         document.getElementById("modal").classList.remove("show");
         await refresh();
-      } catch (err) {
-        alert(err.message);
-      }
+      } catch (err) { alert(err.message); }
     };
-
     document.getElementById("closeModal").onclick = () => document.getElementById("modal").classList.remove("show");
-    document.getElementById("logoutBtn").onclick = async () => {
-      await signOut(auth);
-      location.href = "/index.html";
-    };
+    document.getElementById("logoutBtn").onclick = async () => { await signOut(auth); location.href = "/index.html"; };
   </script>
 </body>
 </html>
