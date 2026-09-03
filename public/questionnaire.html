@@ -18,17 +18,13 @@
       </div>
       <div class="row">
         <a class="btn btn-gray" href="/profile.html">Profile</a>
+        <a class="btn btn-green" href="/draft.html">Draft board</a>
         <a class="btn btn-gray" href="/index.html">Home</a>
         <button id="logoutBtn" class="btn-outline" type="button">Log out</button>
       </div>
     </header>
-
     <div class="card">
-      <p class="muted">
-        Step 1: check every block you can work, then save.
-        Step 2: rank up to 10 favorites. Only checked blocks can be ranked.
-      </p>
-
+      <p class="muted">Step 1: check every block you can work, then save. Step 2: rank up to 10 favorites.</p>
       <h3>1. Availability</h3>
       <div id="avail" class="grid-days"></div>
       <div class="actions">
@@ -37,7 +33,6 @@
       </div>
       <div id="availMsg"></div>
     </div>
-
     <div class="card">
       <h3>2. Top 10 preferences</h3>
       <p class="muted" id="prefHint">Save availability first if the lists look empty.</p>
@@ -47,40 +42,33 @@
       </div>
       <div id="prefMsg"></div>
     </div>
+    <div class="card">
+      <h3>3. Draft board</h3>
+      <p class="muted">Open anytime. Picking only works after an admin starts the draft, and only when you are first in that block.</p>
+      <div class="actions"><a class="btn btn-green" href="/draft.html">Go to draft board</a></div>
+    </div>
   </div>
   <footer>Dark Horses · questionnaire</footer>
-
   <script type="module">
     import { firebaseReady } from "/firebase.js";
     import { timeslots, days, TOP_PREFS } from "/data.js";
     import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
     import { doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-
     function avatarFromName(name) {
       const safe = (name || "User").trim() || "User";
       const initials = safe.split(/\s+/).map((p) => p[0]?.toUpperCase() || "").slice(0, 2).join("") || "U";
       const hash = safe.split("").reduce((acc, ch) => ch.charCodeAt(0) + ((acc << 5) - acc), 0);
       return { initials, color: `hsl(${Math.abs(hash) % 360}, 62%, 42%)` };
     }
-
     function flash(id, msg, kind) {
       document.getElementById(id).innerHTML = msg ? `<div class="flash ${kind}">${msg}</div>` : "";
     }
-
     const { ready, auth, db } = await firebaseReady;
-    if (!ready) {
-      document.body.insertAdjacentHTML("afterbegin", '<div class="flash err">Firebase is not connected. Open the deployed site.</div>');
-      throw new Error("firebase not ready");
-    }
-
+    if (!ready) throw new Error("firebase not ready");
     let uid = null;
     let userData = { availability: {}, prefs: {} };
-
     const byDay = {};
-    days.forEach((day) => {
-      byDay[day] = timeslots.filter((slot) => slot.startsWith(`${day} `));
-    });
-
+    days.forEach((day) => { byDay[day] = timeslots.filter((slot) => slot.startsWith(`${day} `)); });
     onAuthStateChanged(auth, async (user) => {
       if (!user) return location.replace("/index.html");
       uid = user.uid;
@@ -92,128 +80,79 @@
       document.getElementById("hello").textContent = userData.fullName || userData.email || "";
       const av = avatarFromName(userData.fullName || userData.email || "U");
       const el = document.getElementById("avatar");
-      el.textContent = av.initials;
-      el.style.background = av.color;
-      renderAvail();
-      renderPrefs();
+      el.textContent = av.initials; el.style.background = av.color;
+      renderAvail(); renderPrefs();
     });
-
     function renderAvail() {
-      const root = document.getElementById("avail");
-      root.innerHTML = "";
+      const root = document.getElementById("avail"); root.innerHTML = "";
       days.forEach((day) => {
         const col = document.createElement("div");
         col.innerHTML = `<strong>${day}</strong>`;
         byDay[day].forEach((slot) => {
           const i = timeslots.indexOf(slot);
           const checked = userData.availability?.[i] === true ? "checked" : "";
-          col.insertAdjacentHTML(
-            "beforeend",
-            `<label class="check"><input type="checkbox" id="avail${i}" ${checked} /> ${slot.split(" ")[1]}</label>`
-          );
+          col.insertAdjacentHTML("beforeend", `<label class="check"><input type="checkbox" id="avail${i}" ${checked} /> ${slot.split(" ")[1]}</label>`);
         });
         root.appendChild(col);
       });
     }
-
     function collectAvail() {
       const availability = {};
-      timeslots.forEach((_, i) => {
-        const box = document.getElementById(`avail${i}`);
-        availability[i] = Boolean(box?.checked);
-      });
+      timeslots.forEach((_, i) => { availability[i] = Boolean(document.getElementById(`avail${i}`)?.checked); });
       return availability;
     }
-
-    function prunePrefs(availability, prefs) {
-      const next = { ...prefs };
-      Object.keys(next).forEach((key) => {
-        if (!availability[key]) delete next[key];
-      });
-      return next;
-    }
-
     document.getElementById("saveAvailBtn").onclick = async () => {
       const availability = collectAvail();
-      const prefs = prunePrefs(availability, userData.prefs || {});
+      const prefs = { ...(userData.prefs || {}) };
+      Object.keys(prefs).forEach((k) => { if (!availability[k]) delete prefs[k]; });
       await updateDoc(doc(db, "users", uid), { availability, prefs });
-      userData.availability = availability;
-      userData.prefs = prefs;
-      const open = Object.values(availability).filter(Boolean).length;
-      flash("availMsg", `Saved. ${open} block${open === 1 ? "" : "s"} available.`, "ok");
+      userData.availability = availability; userData.prefs = prefs;
+      flash("availMsg", `Saved. ${Object.values(availability).filter(Boolean).length} blocks available.`, "ok");
       renderPrefs();
     };
-
     document.getElementById("resetAvailBtn").onclick = async () => {
-      if (!confirm("Clear all availability checkboxes?")) return;
-      const availability = {};
-      timeslots.forEach((_, i) => { availability[i] = false; });
+      if (!confirm("Clear all availability?")) return;
+      const availability = {}; timeslots.forEach((_, i) => availability[i] = false);
       await updateDoc(doc(db, "users", uid), { availability, prefs: {} });
-      userData.availability = availability;
-      userData.prefs = {};
-      renderAvail();
-      renderPrefs();
-      flash("availMsg", "Availability and preferences cleared.", "warn");
+      userData.availability = availability; userData.prefs = {};
+      renderAvail(); renderPrefs(); flash("availMsg", "Cleared.", "warn");
     };
-
     function renderPrefs() {
-      const root = document.getElementById("prefs");
-      root.innerHTML = "";
+      const root = document.getElementById("prefs"); root.innerHTML = "";
       const openCount = Object.values(userData.availability || {}).filter(Boolean).length;
       document.getElementById("prefHint").textContent = openCount
         ? `${openCount} available blocks. Ranked ${Object.keys(userData.prefs || {}).length} of ${TOP_PREFS}.`
         : "No available blocks yet. Save availability first.";
-
       for (let rank = 1; rank <= TOP_PREFS; rank++) {
         const wrap = document.createElement("div");
-        const label = document.createElement("label");
-        label.textContent = `Rank ${rank}`;
+        const label = document.createElement("label"); label.textContent = `Rank ${rank}`;
         const sel = document.createElement("select");
         sel.innerHTML = `<option value="">Select a timeslot</option>`;
         timeslots.forEach((slot, i) => {
           const open = userData.availability?.[i] === true;
-          const selected = Number(userData.prefs?.[i]) === rank;
           const opt = document.createElement("option");
-          opt.value = String(i);
-          opt.textContent = open ? slot : `${slot} (not available)`;
-          opt.disabled = !open;
-          opt.selected = selected;
+          opt.value = String(i); opt.textContent = open ? slot : `${slot} (not available)`;
+          opt.disabled = !open; opt.selected = Number(userData.prefs?.[i]) === rank;
           sel.appendChild(opt);
         });
-        sel.onchange = () => saveRank(rank, sel.value);
-        wrap.appendChild(label);
-        wrap.appendChild(sel);
-        root.appendChild(wrap);
+        sel.onchange = async () => {
+          const prefs = { ...(userData.prefs || {}) };
+          Object.keys(prefs).forEach((k) => { if (Number(prefs[k]) === rank) delete prefs[k]; });
+          if (sel.value !== "") { delete prefs[sel.value]; prefs[sel.value] = rank; }
+          await updateDoc(doc(db, "users", uid), { prefs });
+          userData.prefs = prefs;
+          flash("prefMsg", `Rank ${rank} saved.`, "ok");
+          renderPrefs();
+        };
+        wrap.appendChild(label); wrap.appendChild(sel); root.appendChild(wrap);
       }
     }
-
-    async function saveRank(rank, value) {
-      const prefs = { ...(userData.prefs || {}) };
-      Object.keys(prefs).forEach((key) => {
-        if (Number(prefs[key]) === rank) delete prefs[key];
-      });
-      if (value !== "") {
-        delete prefs[value];
-        prefs[value] = rank;
-      }
-      await updateDoc(doc(db, "users", uid), { prefs });
-      userData.prefs = prefs;
-      flash("prefMsg", value === "" ? `Rank ${rank} cleared.` : `Rank ${rank} saved.`, "ok");
-      renderPrefs();
-    }
-
     document.getElementById("resetPrefsBtn").onclick = async () => {
-      if (!confirm("Clear all preference ranks?")) return;
+      if (!confirm("Clear ranks?")) return;
       await updateDoc(doc(db, "users", uid), { prefs: {} });
-      userData.prefs = {};
-      renderPrefs();
-      flash("prefMsg", "Preferences cleared.", "warn");
+      userData.prefs = {}; renderPrefs(); flash("prefMsg", "Preferences cleared.", "warn");
     };
-
-    document.getElementById("logoutBtn").onclick = async () => {
-      await signOut(auth);
-      location.href = "/index.html";
-    };
+    document.getElementById("logoutBtn").onclick = async () => { await signOut(auth); location.href = "/index.html"; };
   </script>
 </body>
 </html>
