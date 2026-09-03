@@ -1,5 +1,6 @@
-// Draft boxes group stations. Overlap is clock time: name start + 60 minutes.
-// 0900 Food is the only station offered in two boxes (0830 and 0930).
+// Overlap = station start (4-digit code) + 60 minutes.
+// 1800-1900 is the only 4-station box: Door, Food, Dish, Floater.
+// 1700-1800 is Door + 1715 Dish only.
 
 export const timeslots = [
   "Mon 0730-0830", "Mon 0830-0930", "Mon 0930-1030", "Mon 1030-1130", "Mon 1100-1200", "Mon 1200-1300", "Mon 1300-1400", "Mon 1700-1800", "Mon 1800-1900",
@@ -24,7 +25,7 @@ export const shiftTypes = {
   "1100-1200": ["1100 Door", "1100 Food", "1130 Dish"],
   "1200-1300": ["1200 Door", "1200 Food", "1230 Dish"],
   "1300-1400": ["1300 Door", "1300 Food", "1330 Dish"],
-  "1700-1800": ["1700 Door", "1800 Food", "1715 Dish"],
+  "1700-1800": ["1700 Door", "1715 Dish"],
   "1800-1900": ["1800 Door", "1800 Food", "1815 Dish", "1800 Floater"]
 };
 
