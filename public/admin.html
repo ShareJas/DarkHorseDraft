@@ -17,91 +17,82 @@
       </div>
     </header>
 
-    <div id="gate" class="card" hidden>
-      <h2>This account is not admin yet</h2>
-      <p class="muted" id="gateDetail"></p>
-      <p class="muted"><code>done</code> only means a person already picked 4 shifts. It does not control admin. Use the button below, or in Firestore set <code>isAdmin</code> to boolean true.</p>
+    <div id="boot" class="flash warn">Loading admin…</div>
+    <div id="msg"></div>
+
+    <div class="card">
+      <p class="muted">Each click should print a green or red message here. If nothing happens, hard-refresh (Ctrl+Shift+R).</p>
       <div class="actions">
-        <button id="claimBtn" class="btn-primary" type="button">Make this account admin</button>
+        <button id="initBtn" class="btn-primary" type="button">Initialize shifts</button>
+        <button id="startBtn" class="btn-green" type="button">Start / regenerate draft</button>
+        <button id="clearBtn" class="btn-red" type="button">Clear all picks</button>
+        <button id="lockBtn" class="btn-amber" type="button">Toggle draft lock</button>
       </div>
-      <div id="gateMsg"></div>
+      <p class="muted" id="shiftCount"></p>
     </div>
 
-    <div id="app" hidden>
-      <div class="card">
-        <p class="muted">Order: Initialize shifts (108 docs) → Start draft. <code>done</code> is not required.</p>
-        <div class="actions">
-          <button id="initBtn" class="btn-primary" type="button">Initialize shifts</button>
-          <button id="startBtn" class="btn-green" type="button">Start / regenerate draft</button>
-          <button id="clearBtn" class="btn-red" type="button">Clear all picks</button>
-          <button id="lockBtn" class="btn-amber" type="button">Toggle draft lock</button>
-        </div>
-        <div id="msg"></div>
-        <p class="muted" id="shiftCount"></p>
+    <div class="card">
+      <h2>Staff</h2>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Name</th><th>Avail</th><th>Prefs</th><th>Picks</th><th>Admin</th></tr></thead>
+          <tbody id="userRows"></tbody>
+        </table>
       </div>
-      <div class="card">
-        <h2>Staff</h2>
-        <div style="overflow-x:auto">
-          <table>
-            <thead><tr><th>Name</th><th>Avail</th><th>Prefs</th><th>Picks</th><th>Done</th><th>Admin</th></tr></thead>
-            <tbody id="userRows"></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="card">
-        <h2>Top of each queue</h2>
-        <div style="overflow-x:auto">
-          <table>
-            <thead><tr><th>Block</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr></thead>
-            <tbody id="queueRows"></tbody>
-          </table>
-        </div>
+    </div>
+
+    <div class="card">
+      <h2>Top of each queue</h2>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Block</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr></thead>
+          <tbody id="queueRows"></tbody>
+        </table>
       </div>
     </div>
   </div>
   <footer>Dark Horses · admin</footer>
+
   <script type="module">
     import { firebaseReady } from "/firebase.js";
     import { timeslots, shifts, generateQueues, timeslotDocId } from "/data.js";
     import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
     import { doc, getDoc, setDoc, collection, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-    function asAdmin(value) {
-      return value === true || value === 1 || String(value).toLowerCase() === "true";
+    const boot = document.getElementById("boot");
+    const msg = document.getElementById("msg");
+
+    function isAdminFlag(value) {
+      if (value === true || value === 1) return true;
+      if (typeof value === "string" && value.trim().toLowerCase() === "true") return true;
+      return false;
     }
-    function flash(id, text, kind) {
-      document.getElementById(id).innerHTML = `<div class="flash ${kind}">${text}</div>`;
+
+    function show(text, kind) {
+      msg.innerHTML = `<div class="flash ${kind}">${text}</div>`;
     }
 
-    const { ready, auth, db } = await firebaseReady;
-    if (!ready) throw new Error("firebase not ready");
-    let uid = null;
+    function bind(id, fn) {
+      document.getElementById(id).addEventListener("click", (event) => {
+        event.preventDefault();
+        fn().catch((err) => show(err.message || String(err), "err"));
+      });
+    }
 
-    onAuthStateChanged(auth, async (user) => {
-      if (!user) return location.replace("/index.html");
-      uid = user.uid;
-      const snap = await getDoc(doc(db, "users", uid));
-      const data = snap.data() || {};
-      if (!asAdmin(data.isAdmin)) {
-        document.getElementById("gate").hidden = false;
-        document.getElementById("app").hidden = true;
-        document.getElementById("gateDetail").textContent =
-          `Signed in as ${data.email || user.email || ""} · uid ${uid} · isAdmin is currently ${JSON.stringify(data.isAdmin ?? null)}.`;
-        return;
-      }
-      document.getElementById("gate").hidden = true;
-      document.getElementById("app").hidden = false;
-      await refresh();
-    });
+    let db = null;
+    let auth = null;
 
-    document.getElementById("claimBtn").onclick = async () => {
-      try {
-        await setDoc(doc(db, "users", uid), { isAdmin: true }, { merge: true });
-        location.reload();
-      } catch (err) {
-        flash("gateMsg", err.message || "Could not write isAdmin.", "err");
-      }
-    };
+    try {
+      const bootResult = await firebaseReady;
+      if (!bootResult.ready) throw new Error("Firebase did not initialize. Open the deployed Hosting URL.");
+      auth = bootResult.auth;
+      db = bootResult.db;
+      boot.textContent = `Admin script loaded. Grid has ${shifts.length} stations. Waiting for sign-in…`;
+    } catch (err) {
+      boot.className = "flash err";
+      boot.textContent = err.message || String(err);
+      throw err;
+    }
 
     async function loadUsers() {
       const snap = await getDocs(collection(db, "users"));
@@ -113,95 +104,100 @@
       document.getElementById("userRows").innerHTML = users.map((u) => {
         const avail = Object.values(u.availability || {}).filter(Boolean).length;
         const prefs = Object.keys(u.prefs || {}).length;
-        return `<tr><td>${u.fullName || u.email || u.uid}</td><td>${avail}</td><td>${prefs}</td><td>${(u.picks || []).length}</td><td>${u.done ? "yes" : ""}</td><td>${asAdmin(u.isAdmin) ? "yes" : ""}</td></tr>`;
+        return `<tr><td>${u.fullName || u.email || u.uid}</td><td>${avail}</td><td>${prefs}</td><td>${(u.picks || []).length}</td><td>${isAdminFlag(u.isAdmin) ? "yes" : ""}</td></tr>`;
       }).join("");
+
       const ts = await getDocs(collection(db, "timeslots"));
-      const rows = [];
-      ts.forEach((d) => rows.push(d.data()));
+      const rows = ts.docs.map((d) => d.data());
       rows.sort((a, b) => timeslots.indexOf(a.bucket) - timeslots.indexOf(b.bucket));
       document.getElementById("queueRows").innerHTML = rows.length
         ? rows.map((r) => {
             const q = r.queue || [];
-            const cells = [0,1,2,3,4].map((i) => `<td>${q[i]?.name || "—"}</td>`).join("");
-            return `<tr><td>${r.bucket}</td>${cells}</tr>`;
+            const cells = [0, 1, 2, 3, 4].map((i) => `<td>${q[i]?.name || "—"}</td>`).join("");
+            return `<tr><td>${r.bucket || ""}</td>${cells}</tr>`;
           }).join("")
-        : '<tr><td colspan="6">No queues yet. Start the draft.</td></tr>';
+        : '<tr><td colspan="6">No queues yet. Press Start / regenerate draft.</td></tr>';
+
       const shiftSnap = await getDocs(collection(db, "shifts"));
       const floaters = shiftSnap.docs.filter((d) => String(d.data().type || "").includes("Floater"));
       document.getElementById("shiftCount").textContent =
-        `${shiftSnap.size} shift docs in Firestore (${floaters.length} floater). Code expects ${shifts.length}.`;
+        `${shiftSnap.size} shift docs in Firestore · ${floaters.length} floater · code expects ${shifts.length}`;
+
       const settings = await getDoc(doc(db, "settings", "global"));
-      document.getElementById("lockBtn").textContent = settings.data()?.draftLocked === true ? "Unlock draft" : "Lock draft";
+      document.getElementById("lockBtn").textContent =
+        settings.data()?.draftLocked === true ? "Unlock draft" : "Lock draft";
     }
 
-    document.getElementById("initBtn").onclick = async () => {
-      if (!confirm(`Write ${shifts.length} shift documents? This resets pickedBy on those docs.`)) return;
-      try {
-        const batch = writeBatch(db);
-        shifts.forEach((s) => {
-          batch.set(doc(db, "shifts", s.id), {
-            shiftName: s.shiftName, type: s.type, role: s.role,
-            timeBucket: s.timeBucket, alsoBuckets: s.alsoBuckets || [], pickedBy: null
-          });
+    bind("initBtn", async () => {
+      show("Writing shift documents…", "warn");
+      const batch = writeBatch(db);
+      shifts.forEach((s) => {
+        batch.set(doc(db, "shifts", s.id), {
+          shiftName: s.shiftName, type: s.type, role: s.role,
+          timeBucket: s.timeBucket, alsoBuckets: s.alsoBuckets || [], pickedBy: null
         });
-        await batch.commit();
-        flash("msg", `Initialized ${shifts.length} shifts.`, "ok");
-        await refresh();
-      } catch (err) {
-        flash("msg", err.message || "Initialize failed.", "err");
-      }
-    };
+      });
+      await batch.commit();
+      show(`Initialized ${shifts.length} shifts.`, "ok");
+      await refresh();
+    });
 
-    document.getElementById("startBtn").onclick = async () => {
-      if (!confirm("Build pecking order from current availability and ranks?")) return;
-      try {
-        const users = await loadUsers();
-        const queues = generateQueues(users);
-        const batch = writeBatch(db);
-        Object.entries(queues).forEach(([slot, queue]) => {
-          batch.set(doc(db, "timeslots", timeslotDocId(slot)), { bucket: slot, queue, status: "open" }, { merge: true });
-        });
-        await batch.commit();
-        flash("msg", `Wrote ${Object.keys(queues).length} block queues.`, "ok");
-        await refresh();
-      } catch (err) {
-        flash("msg", err.message || "Start draft failed.", "err");
-      }
-    };
+    bind("startBtn", async () => {
+      show("Building queues from availability and ranks…", "warn");
+      const users = await loadUsers();
+      const queues = generateQueues(users);
+      const batch = writeBatch(db);
+      Object.entries(queues).forEach(([slot, queue]) => {
+        batch.set(doc(db, "timeslots", timeslotDocId(slot)), { bucket: slot, queue, status: "open" }, { merge: true });
+      });
+      await batch.commit();
+      show(`Wrote ${Object.keys(queues).length} block queues for ${users.length} staff.`, "ok");
+      await refresh();
+    });
 
-    document.getElementById("clearBtn").onclick = async () => {
-      if (!confirm("Clear every pick?")) return;
-      try {
-        const shiftSnap = await getDocs(collection(db, "shifts"));
-        const userSnap = await getDocs(collection(db, "users"));
-        const batch = writeBatch(db);
-        shiftSnap.forEach((d) => batch.update(d.ref, { pickedBy: null }));
-        userSnap.forEach((d) => batch.update(d.ref, { picks: [], done: false }));
-        await batch.commit();
-        flash("msg", "Picks cleared.", "ok");
-        await refresh();
-      } catch (err) {
-        flash("msg", err.message || "Clear failed.", "err");
-      }
-    };
+    bind("clearBtn", async () => {
+      show("Clearing picks…", "warn");
+      const shiftSnap = await getDocs(collection(db, "shifts"));
+      const userSnap = await getDocs(collection(db, "users"));
+      const batch = writeBatch(db);
+      shiftSnap.forEach((d) => batch.update(d.ref, { pickedBy: null }));
+      userSnap.forEach((d) => batch.update(d.ref, { picks: [], done: false }));
+      await batch.commit();
+      show("Picks cleared.", "ok");
+      await refresh();
+    });
 
-    document.getElementById("lockBtn").onclick = async () => {
-      try {
-        const ref = doc(db, "settings", "global");
-        const snap = await getDoc(ref);
-        const locked = snap.data()?.draftLocked === true;
-        await setDoc(ref, { draftLocked: !locked }, { merge: true });
-        flash("msg", !locked ? "Draft locked for non-admins." : "Draft unlocked.", "ok");
-        await refresh();
-      } catch (err) {
-        flash("msg", err.message || "Lock failed.", "err");
-      }
-    };
+    bind("lockBtn", async () => {
+      const ref = doc(db, "settings", "global");
+      const snap = await getDoc(ref);
+      const locked = snap.data()?.draftLocked === true;
+      await setDoc(ref, { draftLocked: !locked }, { merge: true });
+      show(locked ? "Draft unlocked." : "Draft locked for non-admins.", "ok");
+      await refresh();
+    });
 
     document.getElementById("logoutBtn").onclick = async () => {
       await signOut(auth);
       location.href = "/index.html";
     };
+
+    onAuthStateChanged(auth, async (user) => {
+      try {
+        if (!user) { location.replace("/index.html"); return; }
+        const snap = await getDoc(doc(db, "users", user.uid));
+        const data = snap.data() || {};
+        if (!isAdminFlag(data.isAdmin)) {
+          location.replace("/draft.html");
+          return;
+        }
+        boot.className = "flash ok";
+        boot.textContent = `Admin signed in as ${data.email || user.email}. isAdmin=${JSON.stringify(data.isAdmin)}`;
+        await refresh();
+      } catch (err) {
+        boot.className = "flash err";
+        boot.textContent = err.message || String(err);
+      }
+    });
   </script>
 </body>
 </html>
