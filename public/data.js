@@ -1,6 +1,5 @@
-// Shift grid + pecking-order algorithm.
-// 0900 Food occupies 0830-0930 AND 0930-1030.
-// 1800 Floater occupies 1800-1900 AND overlaps 1700-1800 (1715 Dish).
+// Draft boxes group stations. Overlap is clock time: name start + 60 minutes.
+// 0900 Food is the only station offered in two boxes (0830 and 0930).
 
 export const timeslots = [
   "Mon 0730-0830", "Mon 0830-0930", "Mon 0930-1030", "Mon 1030-1130", "Mon 1100-1200", "Mon 1200-1300", "Mon 1300-1400", "Mon 1700-1800", "Mon 1800-1900",
@@ -57,26 +56,32 @@ export function findShiftByName(name) {
   return shifts.find((s) => s.shiftName === name || s.id === name) || null;
 }
 
-export function bucketsClaimedByPicks(picks) {
-  const set = new Set();
-  (picks || []).forEach((name) => {
-    const known = findShiftByName(name);
-    if (known) {
-      bucketsForShift(known).forEach((b) => set.add(b));
-      return;
-    }
-    const match = String(name).match(/^(Mon|Tue|Wed|Thu|Fri) \d{4}-\d{4}/);
-    if (match) set.add(match[0]);
-  });
-  return set;
+export function shiftDay(shift) {
+  const match = String(shift.timeBucket || shift.shiftName || "").match(/^(Mon|Tue|Wed|Thu|Fri)/);
+  return match ? match[1] : null;
+}
+
+export function shiftStartMinutes(shift) {
+  const match = `${shift.type || ""} ${shift.shiftName || ""}`.match(/(\d{4})/);
+  if (!match) return null;
+  return Number(match[1].slice(0, 2)) * 60 + Number(match[1].slice(2, 4));
+}
+
+export function intervalsOverlap(a, b) {
+  if (!a || !b) return false;
+  if (shiftDay(a) && shiftDay(b) && shiftDay(a) !== shiftDay(b)) return false;
+  const startA = shiftStartMinutes(a);
+  const startB = shiftStartMinutes(b);
+  if (startA == null || startB == null) return false;
+  return startA < startB + 60 && startB < startA + 60;
+}
+
+export function resolvePick(name) {
+  return findShiftByName(name) || { shiftName: name, type: name };
 }
 
 export function shiftsOverlap(shift, picks) {
-  const next = new Set(bucketsForShift(shift));
-  for (const bucket of bucketsClaimedByPicks(picks)) {
-    if (next.has(bucket)) return true;
-  }
-  return false;
+  return (picks || []).some((name) => intervalsOverlap(shift, resolvePick(name)));
 }
 
 export function timeslotDocId(slot) {
@@ -91,17 +96,13 @@ export const shifts = [];
 timeslots.forEach((slot) => {
   const [day, time] = slot.split(" ");
   (shiftTypes[time] || []).forEach((type) => {
-    const alsoBuckets = [];
-    if (type === "0900 Food") alsoBuckets.push(`${day} 0930-1030`);
-    if (type === "1800 Floater") alsoBuckets.push(`${day} 1700-1800`);
-    if (type === "1715 Dish") alsoBuckets.push(`${day} 1800-1900`);
     shifts.push({
       id: shiftDocId(slot, type),
       shiftName: `${slot} ${type}`,
       type,
       role: roleFromType(type),
       timeBucket: slot,
-      alsoBuckets
+      alsoBuckets: type === "0900 Food" ? [`${day} 0930-1030`] : []
     });
   });
 });
@@ -155,8 +156,9 @@ export function generateQueues(users, seed = DRAFT_SEED) {
     const winner = cands.find((u) => rankFor(u, index) < BLANK_RANK);
     if (!winner) return;
     const winnerRank = rankFor(winner, index);
-    const contested = cands.some((other) => other.uid !== winner.uid && rankFor(other, index) === winnerRank);
-    if (contested) topWins[winner.uid] += 1;
+    if (cands.some((other) => other.uid !== winner.uid && rankFor(other, index) === winnerRank)) {
+      topWins[winner.uid] += 1;
+    }
   });
   return orders;
 }
