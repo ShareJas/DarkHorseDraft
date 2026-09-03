@@ -27,8 +27,8 @@
     <div id="lockBanner" class="flash warn" hidden>Draft is locked.</div>
 
     <div class="card">
-      <h2>Your next blocks</h2>
-      <p class="muted">Pick only when you are #1 in that block. Ranking neighbors 1 and 2 is how you bid for a double.</p>
+      <h2>You're up</h2>
+      <p class="muted">Only blocks where you are first in line. Place in line for everyone else is the chips on the calendar.</p>
       <div id="nextUp" class="row"></div>
     </div>
 
@@ -61,8 +61,9 @@
   <script type="module">
     import { firebaseReady } from "/firebase.js";
     import {
-      timeslots, timeBuckets, days, shiftTypes, generateAvatar,
-      timeslotDocId, roleFromType, MAX_PICKS, MAX_PER_TYPE
+      timeslots, timeBuckets, days, generateAvatar,
+      timeslotDocId, roleFromType, bucketsForShift, shiftTouchesSlot,
+      MAX_PICKS, MAX_PER_TYPE
     } from "/data.js";
     import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
     import {
@@ -88,10 +89,11 @@
       el.textContent = av.initials;
       el.style.background = av.color;
       document.getElementById("hello").textContent = me.fullName || "Draft";
-      if (me.isAdmin) document.getElementById("adminLink").hidden = false;
-
+      if (me.isAdmin === true || String(me.isAdmin).toLowerCase() === "true") {
+        document.getElementById("adminLink").hidden = false;
+      }
       const settings = await getDoc(doc(db, "settings", "global"));
-      if (settings.data()?.draftLocked && !me.isAdmin) {
+      if (settings.data()?.draftLocked && !(me.isAdmin === true || String(me.isAdmin).toLowerCase() === "true")) {
         document.getElementById("lockBanner").hidden = false;
         return;
       }
@@ -117,42 +119,46 @@
       const tsSnap = await getDocs(collection(db, "timeslots"));
       const shiftMap = {};
       shiftsSnap.forEach((d) => {
-        const s = d.data();
-        const [day, time] = String(s.timeBucket || "").split(" ");
-        if (!shiftMap[time]) shiftMap[time] = {};
-        if (!shiftMap[time][day]) shiftMap[time][day] = [];
-        shiftMap[time][day].push({ id: d.id, ...s });
+        const s = { id: d.id, ...d.data() };
+        bucketsForShift(s).forEach((bucket) => {
+          const [day, time] = String(bucket).split(" ");
+          if (!time || !day) return;
+          if (!shiftMap[time]) shiftMap[time] = {};
+          if (!shiftMap[time][day]) shiftMap[time][day] = [];
+          if (!shiftMap[time][day].some((x) => x.id === s.id)) shiftMap[time][day].push(s);
+        });
       });
       const queues = {};
       tsSnap.forEach((d) => { queues[d.data().bucket] = d.data().queue || []; });
 
       const mine = [];
       Object.entries(queues).forEach(([bucket, queue]) => {
-        const pos = queue.findIndex((q) => q.userId === uid);
-        if (pos >= 0 && pos < 5) mine.push({ bucket, pos: pos + 1 });
+        if (queue.findIndex((q) => q.userId === uid) === 0) mine.push({ bucket });
       });
-      mine.sort((a, b) => a.pos - b.pos || timeslots.indexOf(a.bucket) - timeslots.indexOf(b.bucket));
+      mine.sort((a, b) => timeslots.indexOf(a.bucket) - timeslots.indexOf(b.bucket));
       const next = document.getElementById("nextUp");
       next.innerHTML = "";
-      if (!mine.length) next.innerHTML = '<p class="muted">You are not in the top 5 of any block. Admin may still need to start the draft.</p>';
+      if (!mine.length) {
+        next.innerHTML = picks.length >= MAX_PICKS
+          ? '<p class="muted">You already have 4 picks.</p>'
+          : '<p class="muted">You are not first in any block right now.</p>';
+      }
       mine.forEach((m) => {
         const btn = document.createElement("button");
-        btn.className = m.pos === 1 ? "btn-primary" : "btn-gray";
-        btn.textContent = `${m.pos === 1 ? "Pick" : "#" + m.pos} · ${m.bucket}`;
-        btn.disabled = m.pos !== 1 || picks.length >= MAX_PICKS;
+        btn.className = "btn-primary";
+        btn.textContent = `Pick ${m.bucket}`;
+        btn.disabled = picks.length >= MAX_PICKS;
         btn.onclick = () => openModal(m.bucket);
         next.appendChild(btn);
       });
 
       let html = "<thead><tr><th>Time</th>" + days.map((d) => `<th>${d}</th>`).join("") + "</tr></thead><tbody>";
       timeBuckets.forEach((time) => {
-        html += `<tr><td><strong>${time}</strong></td>`;
+        const eve = time.startsWith("17") || time.startsWith("18") ? "evening" : "";
+        html += `<tr class="${eve}"><td><strong>${time}</strong></td>`;
         days.forEach((day) => {
           const slot = `${day} ${time}`;
-          if (!timeslots.includes(slot)) {
-            html += "<td class='muted'>—</td>";
-            return;
-          }
+          if (!timeslots.includes(slot)) { html += "<td class='muted'>—</td>"; return; }
           const list = shiftMap[time]?.[day] || [];
           let cell = "<table class='sub'>";
           list.forEach((s) => {
@@ -182,23 +188,27 @@
     }
 
     async function fillModal() {
-      const time = activeSlot.split(" ")[1];
-      const types = shiftTypes[time] || [];
       const snap = await getDocs(collection(db, "shifts"));
       const list = document.getElementById("modalList");
       list.innerHTML = "";
-      types.forEach((type) => {
-        const row = snap.docs.find((d) => d.data().shiftName === `${activeSlot} ${type}`);
-        const div = document.createElement("div");
-        if (row && !row.data().pickedBy) {
-          div.className = "list-item";
-          div.textContent = `${type} — open`;
-          div.onclick = () => pick(row.id);
+      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((s) => shiftTouchesSlot(s, activeSlot));
+      if (!rows.length) {
+        list.innerHTML = '<p class="muted">No stations in this block. Admin: Initialize shifts.</p>';
+        return;
+      }
+      rows.forEach((row) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        if (!row.pickedBy) {
+          btn.className = "btn-primary pick-choice";
+          btn.textContent = row.type === "0900 Food" ? "0900 Food (8:30 or 9:30 block)" : row.type;
+          btn.onclick = () => pick(row.id);
         } else {
-          div.className = "list-item off";
-          div.textContent = `${type} — taken`;
+          btn.className = "btn-gray pick-choice";
+          btn.disabled = true;
+          btn.textContent = `${row.type} — taken`;
         }
-        list.appendChild(div);
+        list.appendChild(btn);
       });
     }
 
@@ -208,9 +218,7 @@
           const shiftRef = doc(db, "shifts", shiftId);
           const userRef = doc(db, "users", uid);
           const tsRef = doc(db, "timeslots", timeslotDocId(activeSlot));
-          const [shiftSnap, userSnap, tsSnap] = await Promise.all([
-            tx.get(shiftRef), tx.get(userRef), tx.get(tsRef)
-          ]);
+          const [shiftSnap, userSnap, tsSnap] = await Promise.all([tx.get(shiftRef), tx.get(userRef), tx.get(tsRef)]);
           if (!shiftSnap.exists()) throw new Error("Shifts are missing. Admin: Initialize shifts.");
           if (!tsSnap.exists()) throw new Error("Queues missing. Admin: Start draft.");
           const shift = shiftSnap.data();
@@ -221,20 +229,21 @@
           const role = roleFromType(shift.type);
           const count = (user.picks || []).filter((p) => roleFromType(p) === role).length;
           if (count >= MAX_PER_TYPE) throw new Error(`Max ${MAX_PER_TYPE} ${role} shifts.`);
-          if ((user.picks || []).some((p) => p.includes(activeSlot))) throw new Error("You already have this block.");
+          const claimed = bucketsForShift(shift);
+          if ((user.picks || []).some((p) => claimed.some((b) => p.includes(b)))) {
+            throw new Error("That station overlaps a block you already picked.");
+          }
           if (queue[0]?.userId !== uid) throw new Error("Not your turn in this block.");
           const picks = [...(user.picks || []), shift.shiftName];
           tx.update(shiftRef, { pickedBy: uid });
           tx.update(userRef, { picks, done: picks.length >= MAX_PICKS });
           tx.update(tsRef, { queue: queue.slice(1) });
         });
-
         const userSnap = await getDoc(doc(db, "users", uid));
         if ((userSnap.data().picks || []).length >= MAX_PICKS) {
           const all = await getDocs(collection(db, "timeslots"));
           for (const t of all.docs) {
-            const q = (t.data().queue || []).filter((x) => x.userId !== uid);
-            await updateDoc(t.ref, { queue: q });
+            await updateDoc(t.ref, { queue: (t.data().queue || []).filter((x) => x.userId !== uid) });
           }
         }
         document.getElementById("modal").classList.remove("show");
