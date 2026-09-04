@@ -11,10 +11,7 @@
     <header class="top">
       <div class="brand">
         <div id="avatar" class="avatar"></div>
-        <div>
-          <h1 id="hello">Draft board</h1>
-          <p class="muted" id="meta"></p>
-        </div>
+        <div><h1 id="hello">Draft board</h1><p class="muted" id="meta"></p></div>
       </div>
       <div class="row">
         <a class="btn btn-gray" href="/questionnaire.html">Questionnaire</a>
@@ -37,10 +34,7 @@
     <div class="card">
       <h2>Your picks</h2>
       <div style="overflow-x:auto">
-        <table>
-          <thead><tr><th>Station</th><th>Block</th><th></th></tr></thead>
-          <tbody id="myPicks"></tbody>
-        </table>
+        <table><thead><tr><th>Station</th><th>Block</th><th></th></tr></thead><tbody id="myPicks"></tbody></table>
       </div>
     </div>
   </div>
@@ -61,11 +55,10 @@
     import {
       timeslots, timeBuckets, days, generateAvatar, timeslotDocId, roleFromType,
       bucketsForShift, shiftTouchesSlot, findShiftByName, shiftsOverlap,
-      userWantsSlot, slotHasOpenStation, MAX_PICKS, MAX_PER_TYPE
+      userWantsSlot, slotHasOpenStation, slotIsFull, placeInQueue, MAX_PICKS, MAX_PER_TYPE
     } from "/data.js";
     import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
     import { doc, collection, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-
     const { ready, auth, db } = await firebaseReady;
     if (!ready) throw new Error("firebase not ready");
     const adminish = (v) => v === true || String(v).toLowerCase() === "true";
@@ -109,8 +102,7 @@
         schedulePaint();
       });
       onSnapshot(doc(db, "settings", "global"), (snap) => {
-        draftLocked = snap.data()?.draftLocked === true;
-        schedulePaint();
+        draftLocked = snap.data()?.draftLocked === true; schedulePaint();
       });
     }
     onAuthStateChanged(auth, (user) => {
@@ -123,8 +115,7 @@
       const paintKey = `${draftLocked}|${picks.join(",")}|${shiftRows.map((s) => s.pickedBy || "").join(".")}|${Object.values(queues).map((q) => (q[0] && q[0].userId) || "").join(".")}`;
       if (paintKey === lastPaintKey) return;
       lastPaintKey = paintKey;
-      const boot = document.getElementById("bootBanner");
-      if (boot) boot.hidden = true;
+      const boot = document.getElementById("bootBanner"); if (boot) boot.hidden = true;
       const lockedOut = draftLocked && !adminish(me.isAdmin);
       document.getElementById("lockBanner").hidden = !lockedOut;
       document.getElementById("meta").textContent = `${picks.length}/${MAX_PICKS} picks · max ${MAX_PER_TYPE} per type · live`;
@@ -264,8 +255,7 @@
           const user = userSnap.data() || {};
           const hadAllFour = (user.picks || []).length >= MAX_PICKS || user.done === true;
           const picks = (user.picks || []).filter((p) => p !== shiftName && p !== shift.shiftName);
-          const homeBuckets = bucketsForShift(known || shift);
-          const slotList = hadAllFour ? timeslots : homeBuckets;
+          const slotList = hadAllFour ? timeslots : bucketsForShift(known || shift);
           const imagined = shiftRows.map((s) => (s.id === shiftId || s.shiftName === shiftName ? { ...s, pickedBy: null } : s));
           const tsRefs = slotList.map((b) => doc(db, "timeslots", timeslotDocId(b)));
           const tsSnaps = [];
@@ -276,10 +266,10 @@
           tsSnaps.forEach((snap, i) => {
             if (!snap.exists()) return;
             const slot = slotList[i];
-            let queue = (snap.data().queue || []).filter((x) => x.userId !== uid);
-            const eligible = !hadAllFour || (userWantsSlot({ uid, ...user }, slot) && slotHasOpenStation(slot, imagined, picks));
-            if (eligible) queue.splice(Math.min(1, queue.length), 0, meEntry);
-            tx.update(tsRefs[i], { queue });
+            if (slotIsFull(slot, imagined)) return;
+            if (hadAllFour && !(userWantsSlot({ uid, ...user }, slot) && slotHasOpenStation(slot, imagined, picks))) return;
+            const data = snap.data();
+            tx.update(tsRefs[i], { queue: placeInQueue(data.queue || [], data.order || data.queue || [], meEntry) });
           });
         });
       } catch (err) { alert(err.message); }
@@ -292,7 +282,8 @@
           const snap = await tx.get(tsRef);
           const queue = snap.data()?.queue || [];
           if (queue[0]?.userId !== uid) throw new Error("Not your turn.");
-          const first = queue.shift(); queue.push(first);
+          const first = queue.shift();
+          queue.push({ ...first, passed: true });
           tx.update(tsRef, { queue });
         });
         document.getElementById("modal").classList.remove("show");
