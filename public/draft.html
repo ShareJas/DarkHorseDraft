@@ -23,6 +23,7 @@
         <button id="logoutBtn" class="btn-outline" type="button">Log out</button>
       </div>
     </header>
+    <div id="bootBanner" class="flash warn">Loading board…</div>
     <div id="lockBanner" class="flash warn" hidden>Draft is locked.</div>
     <div class="card">
       <h2>You're up</h2>
@@ -63,39 +64,48 @@
       userWantsSlot, slotHasOpenStation, MAX_PICKS, MAX_PER_TYPE
     } from "/data.js";
     import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-    import { doc, getDoc, collection, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+    import { doc, collection, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
     const { ready, auth, db } = await firebaseReady;
     if (!ready) throw new Error("firebase not ready");
     const adminish = (v) => v === true || String(v).toLowerCase() === "true";
     let uid = null, me = {}, names = {}, activeSlot = null;
-    let shiftRows = [], queues = {}, draftLocked = false, paintTimer = null, listenersOn = false;
+    let shiftRows = [], queues = {}, draftLocked = false;
+    let paintTimer = null, listenersOn = false, haveShifts = false, haveSlots = false, lastPaintKey = "";
+    const chipLimit = window.matchMedia("(max-width: 720px)").matches ? 2 : 4;
     function entryFor(user) {
       return { userId: user.uid || uid, name: user.fullName || user.email || uid };
     }
     function schedulePaint() {
+      if (!haveShifts || !haveSlots || !uid) return;
       clearTimeout(paintTimer);
-      paintTimer = setTimeout(paint, 80);
+      paintTimer = setTimeout(() => requestAnimationFrame(paint), 120);
     }
     function startLive() {
       if (listenersOn) return;
       listenersOn = true;
       onSnapshot(collection(db, "shifts"), (snap) => {
         shiftRows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        schedulePaint();
+        haveShifts = true; schedulePaint();
       });
       onSnapshot(collection(db, "timeslots"), (snap) => {
         queues = {};
-        snap.forEach((d) => { queues[d.data().bucket] = d.data().queue || []; });
-        schedulePaint();
-      });
-      onSnapshot(collection(db, "users"), (snap) => {
-        names = {};
         snap.forEach((d) => {
           const data = d.data();
-          names[d.id] = data.fullName || data.email || d.id;
-          if (d.id === uid) me = { uid, ...data };
+          queues[data.bucket] = data.queue || [];
+          (data.queue || []).forEach((p) => { if (p.userId && p.name) names[p.userId] = p.name; });
         });
+        haveSlots = true; schedulePaint();
+      });
+      onSnapshot(doc(db, "users", uid), (snap) => {
+        if (!snap.exists()) return location.replace("/index.html");
+        me = { uid, ...snap.data() };
+        names[uid] = me.fullName || me.email || uid;
+        const av = generateAvatar(names[uid]);
+        const el = document.getElementById("avatar");
+        el.textContent = av.initials; el.style.background = av.color;
+        document.getElementById("hello").textContent = me.fullName || "Draft";
+        document.getElementById("adminLink").hidden = !adminish(me.isAdmin);
         schedulePaint();
       });
       onSnapshot(doc(db, "settings", "global"), (snap) => {
@@ -103,22 +113,18 @@
         schedulePaint();
       });
     }
-    onAuthStateChanged(auth, async (user) => {
+    onAuthStateChanged(auth, (user) => {
       if (!user) return location.replace("/index.html");
-      uid = user.uid;
-      const snap = await getDoc(doc(db, "users", uid));
-      if (!snap.exists()) return location.replace("/index.html");
-      me = { uid, ...snap.data() };
-      const av = generateAvatar(me.fullName || me.email || "U");
-      const el = document.getElementById("avatar");
-      el.textContent = av.initials; el.style.background = av.color;
-      document.getElementById("hello").textContent = me.fullName || "Draft";
-      if (adminish(me.isAdmin)) document.getElementById("adminLink").hidden = false;
-      startLive();
+      uid = user.uid; startLive();
     });
     function paint() {
-      if (!uid) return;
+      if (!uid || !haveShifts || !haveSlots) return;
       const picks = me.picks || [];
+      const paintKey = `${draftLocked}|${picks.join(",")}|${shiftRows.map((s) => s.pickedBy || "").join(".")}|${Object.values(queues).map((q) => (q[0] && q[0].userId) || "").join(".")}`;
+      if (paintKey === lastPaintKey) return;
+      lastPaintKey = paintKey;
+      const boot = document.getElementById("bootBanner");
+      if (boot) boot.hidden = true;
       const lockedOut = draftLocked && !adminish(me.isAdmin);
       document.getElementById("lockBanner").hidden = !lockedOut;
       document.getElementById("meta").textContent = `${picks.length}/${MAX_PICKS} picks · max ${MAX_PER_TYPE} per type · live`;
@@ -173,12 +179,12 @@
           const list = shiftMap[time]?.[day] || [];
           let cell = "<table class='sub'>";
           list.forEach((s) => {
-            const who = s.pickedBy ? (names[s.pickedBy] || s.pickedBy) : "Open";
+            const who = s.pickedBy ? (s.pickedByName || names[s.pickedBy] || "Taken") : "Open";
             const cls = s.pickedBy === uid ? "mine" : (s.pickedBy ? "taken" : "open");
             cell += `<tr class="${cls}"><td>${s.type}</td><td>${who}</td></tr>`;
           });
           cell += "<tr><td colspan='2'>";
-          (queues[slot] || []).slice(0, 4).forEach((p) => {
+          (queues[slot] || []).slice(0, chipLimit).forEach((p) => {
             const av = generateAvatar(p.name || p.userId);
             cell += `<span class="queue-chip" title="${p.name || ""}" style="background:${av.color}">${av.initials}</span>`;
           });
@@ -219,8 +225,7 @@
           const user = userSnap.data() || {};
           const buckets = bucketsForShift(findShiftByName(shift.shiftName) || shift);
           const needAll = (user.picks || []).length + 1 >= MAX_PICKS;
-          const slotList = needAll ? timeslots : buckets;
-          const tsRefs = slotList.map((b) => doc(db, "timeslots", timeslotDocId(b)));
+          const tsRefs = (needAll ? timeslots : buckets).map((b) => doc(db, "timeslots", timeslotDocId(b)));
           const tsSnaps = [];
           for (const ref of tsRefs) tsSnaps.push(await tx.get(ref));
           if (shift.pickedBy) throw new Error("Already taken.");
@@ -228,14 +233,12 @@
           const role = roleFromType(shift.type);
           const count = (user.picks || []).filter((p) => roleFromType(p) === role).length;
           if (count >= MAX_PER_TYPE) throw new Error(`Max ${MAX_PER_TYPE} ${role} shifts.`);
-          if (shiftsOverlap(findShiftByName(shift.shiftName) || shift, user.picks || [])) {
-            throw new Error("That station overlaps a block you already picked.");
-          }
+          if (shiftsOverlap(findShiftByName(shift.shiftName) || shift, user.picks || [])) throw new Error("That station overlaps a block you already picked.");
           const activeRef = doc(db, "timeslots", timeslotDocId(activeSlot));
           const activeSnap = tsSnaps.find((s) => s.id === activeRef.id);
           if ((activeSnap?.data()?.queue || [])[0]?.userId !== uid) throw new Error("Not your turn in this block.");
           const picks = [...(user.picks || []), shift.shiftName];
-          tx.update(shiftRef, { pickedBy: uid });
+          tx.update(shiftRef, { pickedBy: uid, pickedByName: user.fullName || user.email || uid });
           tx.update(userRef, { picks, done: picks.length >= MAX_PICKS });
           tsSnaps.forEach((snap, i) => {
             if (!snap.exists()) return;
@@ -264,15 +267,16 @@
           const tsRefs = timeslots.map((b) => doc(db, "timeslots", timeslotDocId(b)));
           const tsSnaps = [];
           for (const ref of tsRefs) tsSnaps.push(await tx.get(ref));
-          tx.update(shiftRef, { pickedBy: null });
+          tx.update(shiftRef, { pickedBy: null, pickedByName: null });
           tx.update(userRef, { picks, done: false });
           const meEntry = entryFor(user);
           tsSnaps.forEach((snap, i) => {
             if (!snap.exists()) return;
             const slot = timeslots[i];
             let queue = (snap.data().queue || []).filter((x) => x.userId !== uid);
-            const eligible = userWantsSlot({ uid, ...user }, slot) && slotHasOpenStation(slot, imagined, picks);
-            if (eligible) queue.splice(Math.min(1, queue.length), 0, meEntry);
+            if (userWantsSlot({ uid, ...user }, slot) && slotHasOpenStation(slot, imagined, picks)) {
+              queue.splice(Math.min(1, queue.length), 0, meEntry);
+            }
             tx.update(tsRefs[i], { queue });
           });
         });
