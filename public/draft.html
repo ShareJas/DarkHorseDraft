@@ -249,7 +249,7 @@
       } catch (err) { alert(err.message); }
     }
     async function releaseShift(shiftName) {
-      if (!confirm(`Release ${shiftName}? You return to 2nd in every still-open line you can work.`)) return;
+      if (!confirm(`Release ${shiftName}?`)) return;
       try {
         const known = findShiftByName(shiftName);
         const shiftId = known?.id || shiftName.replace(/\s+/g, "_");
@@ -262,9 +262,12 @@
           const shift = { id: shiftSnap.id, ...shiftSnap.data() };
           if (shift.pickedBy && shift.pickedBy !== uid) throw new Error("That station is not yours.");
           const user = userSnap.data() || {};
+          const hadAllFour = (user.picks || []).length >= MAX_PICKS || user.done === true;
           const picks = (user.picks || []).filter((p) => p !== shiftName && p !== shift.shiftName);
+          const homeBuckets = bucketsForShift(known || shift);
+          const slotList = hadAllFour ? timeslots : homeBuckets;
           const imagined = shiftRows.map((s) => (s.id === shiftId || s.shiftName === shiftName ? { ...s, pickedBy: null } : s));
-          const tsRefs = timeslots.map((b) => doc(db, "timeslots", timeslotDocId(b)));
+          const tsRefs = slotList.map((b) => doc(db, "timeslots", timeslotDocId(b)));
           const tsSnaps = [];
           for (const ref of tsRefs) tsSnaps.push(await tx.get(ref));
           tx.update(shiftRef, { pickedBy: null, pickedByName: null });
@@ -272,11 +275,10 @@
           const meEntry = entryFor(user);
           tsSnaps.forEach((snap, i) => {
             if (!snap.exists()) return;
-            const slot = timeslots[i];
+            const slot = slotList[i];
             let queue = (snap.data().queue || []).filter((x) => x.userId !== uid);
-            if (userWantsSlot({ uid, ...user }, slot) && slotHasOpenStation(slot, imagined, picks)) {
-              queue.splice(Math.min(1, queue.length), 0, meEntry);
-            }
+            const eligible = !hadAllFour || (userWantsSlot({ uid, ...user }, slot) && slotHasOpenStation(slot, imagined, picks));
+            if (eligible) queue.splice(Math.min(1, queue.length), 0, meEntry);
             tx.update(tsRefs[i], { queue });
           });
         });
