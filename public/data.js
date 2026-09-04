@@ -1,6 +1,6 @@
+// Overlap = station start (4-digit code) + 60 minutes.
 // 1700-1800: Door, 1700 Food, 1715 Dish.
-// 1800-1900: Door, Food, 1815 Dish, Floater (4 people).
-// Only 0900 Food appears in two boxes.
+// 1800-1900: Door, Food, 1815 Dish, Floater.
 
 export const timeslots = [
   "Mon 0730-0830", "Mon 0830-0930", "Mon 0930-1030", "Mon 1030-1130", "Mon 1100-1200", "Mon 1200-1300", "Mon 1300-1400", "Mon 1700-1800", "Mon 1800-1900",
@@ -85,6 +85,20 @@ export function resolvePick(name) {
 
 export function shiftsOverlap(shift, picks) {
   return (picks || []).some((name) => intervalsOverlap(shift, resolvePick(name)));
+}
+
+export function userWantsSlot(user, slot) {
+  const index = timeslots.indexOf(slot);
+  if (index < 0) return false;
+  if (user?.availability?.[index] === true) return true;
+  const n = Number(user?.prefs?.[index]);
+  return Number.isFinite(n) && n > 0 && n < BLANK_RANK;
+}
+
+export function slotHasOpenStation(slot, shiftRows, picks) {
+  return (shiftRows || []).some((s) =>
+    !s.pickedBy && shiftTouchesSlot(s, slot) && !shiftsOverlap(s, picks || [])
+  );
 }
 
 export function timeslotDocId(slot) {
