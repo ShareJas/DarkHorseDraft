@@ -16,12 +16,10 @@
         <button id="logoutBtn" class="btn-outline" type="button">Log out</button>
       </div>
     </header>
-
     <div id="boot" class="flash warn">Loading admin…</div>
     <div id="msg"></div>
-
     <div class="card">
-      <p class="muted">Each click should print a green or red message here. If nothing happens, hard-refresh (Ctrl+Shift+R).</p>
+      <p class="muted">Each click should print a green or red message here.</p>
       <div class="actions">
         <button id="initBtn" class="btn-primary" type="button">Initialize shifts</button>
         <button id="startBtn" class="btn-green" type="button">Start / regenerate draft</button>
@@ -30,19 +28,17 @@
       </div>
       <p class="muted" id="shiftCount"></p>
     </div>
-
     <div class="card">
       <h2>Staff</h2>
       <div style="overflow-x:auto">
         <table>
           <thead><tr><th>Name</th><th>Avail</th><th>Prefs</th><th>Picks</th><th>Admin</th></tr></thead>
-          <tbody id="userRows"></tbody>
+          <tbody id="staffRows"></tbody>
         </table>
       </div>
     </div>
-
     <div class="card">
-      <h2>Top of each queue</h2>
+      <h2>Queues</h2>
       <div style="overflow-x:auto">
         <table>
           <thead><tr><th>Block</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr></thead>
@@ -52,151 +48,112 @@
     </div>
   </div>
   <footer>Dark Horses · admin</footer>
-
   <script type="module">
     import { firebaseReady } from "/firebase.js";
     import { timeslots, shifts, generateQueues, timeslotDocId } from "/data.js";
     import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
     import { doc, getDoc, setDoc, collection, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-
     const boot = document.getElementById("boot");
     const msg = document.getElementById("msg");
-
+    const { ready, auth, db } = await firebaseReady;
+    if (!ready) throw new Error("firebase not ready");
     function isAdminFlag(value) {
-      if (value === true || value === 1) return true;
-      if (typeof value === "string" && value.trim().toLowerCase() === "true") return true;
-      return false;
+      return value === true || value === 1 || (typeof value === "string" && value.trim().toLowerCase() === "true");
     }
-
-    function show(text, kind) {
-      msg.innerHTML = `<div class="flash ${kind}">${text}</div>`;
-    }
-
+    function show(text, kind) { msg.innerHTML = `<div class="flash ${kind}">${text}</div>`; }
     function bind(id, fn) {
-      document.getElementById(id).addEventListener("click", (event) => {
+      document.getElementById(id).addEventListener("click", async (event) => {
         event.preventDefault();
-        fn().catch((err) => show(err.message || String(err), "err"));
+        try { await fn(); } catch (err) { show(err.message || String(err), "err"); }
       });
     }
-
-    let db = null;
-    let auth = null;
-
-    try {
-      const bootResult = await firebaseReady;
-      if (!bootResult.ready) throw new Error("Firebase did not initialize. Open the deployed Hosting URL.");
-      auth = bootResult.auth;
-      db = bootResult.db;
-      boot.textContent = `Admin script loaded. Grid has ${shifts.length} stations. Waiting for sign-in…`;
-    } catch (err) {
-      boot.className = "flash err";
-      boot.textContent = err.message || String(err);
-      throw err;
-    }
-
     async function loadUsers() {
       const snap = await getDocs(collection(db, "users"));
       return snap.docs.map((d) => ({ uid: d.id, ...d.data() }));
     }
-
     async function refresh() {
       const users = await loadUsers();
-      document.getElementById("userRows").innerHTML = users.map((u) => {
-        const avail = Object.values(u.availability || {}).filter(Boolean).length;
-        const prefs = Object.keys(u.prefs || {}).length;
+      document.getElementById("staffRows").innerHTML = users.map((u) => {
+        const avail = (u.availability || []).filter(Boolean).length;
+        const prefs = (u.prefs || []).filter((p) => p !== "" && p != null).length;
         return `<tr><td>${u.fullName || u.email || u.uid}</td><td>${avail}</td><td>${prefs}</td><td>${(u.picks || []).length}</td><td>${isAdminFlag(u.isAdmin) ? "yes" : ""}</td></tr>`;
       }).join("");
-
       const ts = await getDocs(collection(db, "timeslots"));
       const rows = ts.docs.map((d) => d.data());
       rows.sort((a, b) => timeslots.indexOf(a.bucket) - timeslots.indexOf(b.bucket));
       document.getElementById("queueRows").innerHTML = rows.length
         ? rows.map((r) => {
             const q = r.queue || [];
-            const cells = [0, 1, 2, 3, 4].map((i) => `<td>${q[i]?.name || "—"}</td>`).join("");
+            const cells = [0,1,2,3,4].map((i) => `<td>${q[i]?.name || "—"}</td>`).join("");
             return `<tr><td>${r.bucket || ""}</td>${cells}</tr>`;
           }).join("")
         : '<tr><td colspan="6">No queues yet. Press Start / regenerate draft.</td></tr>';
-
       const shiftSnap = await getDocs(collection(db, "shifts"));
-      const floaters = shiftSnap.docs.filter((d) => String(d.data().type || "").includes("Floater"));
-      document.getElementById("shiftCount").textContent =
-        `${shiftSnap.size} shift docs in Firestore · ${floaters.length} floater · code expects ${shifts.length}`;
-
+      document.getElementById("shiftCount").textContent = `${shiftSnap.size} shift docs · code expects ${shifts.length}`;
       const settings = await getDoc(doc(db, "settings", "global"));
-      document.getElementById("lockBtn").textContent =
-        settings.data()?.draftLocked === true ? "Unlock draft" : "Lock draft";
+      document.getElementById("lockBtn").textContent = settings.data()?.draftLocked === true ? "Unlock draft" : "Lock draft";
     }
-
     bind("initBtn", async () => {
       show("Writing shift documents…", "warn");
       const batch = writeBatch(db);
+      const keep = new Set(shifts.map((s) => s.id));
       shifts.forEach((s) => {
         batch.set(doc(db, "shifts", s.id), {
           shiftName: s.shiftName, type: s.type, role: s.role,
           timeBucket: s.timeBucket, alsoBuckets: s.alsoBuckets || [], pickedBy: null
         });
       });
+      const existing = await getDocs(collection(db, "shifts"));
+      existing.forEach((d) => { if (!keep.has(d.id)) batch.delete(d.ref); });
       await batch.commit();
-      show(`Initialized ${shifts.length} shifts.`, "ok");
+      show(`Initialized ${shifts.length} shifts and removed leftovers.`, "ok");
       await refresh();
     });
-
     bind("startBtn", async () => {
       show("Building queues from availability and ranks…", "warn");
       const users = await loadUsers();
       const queues = generateQueues(users);
       const batch = writeBatch(db);
       Object.entries(queues).forEach(([slot, queue]) => {
-        batch.set(doc(db, "timeslots", timeslotDocId(slot)), { bucket: slot, queue, status: "open" }, { merge: true });
+        batch.set(doc(db, "timeslots", timeslotDocId(slot)), {
+          bucket: slot,
+          queue,
+          order: queue.map((x) => ({ userId: x.userId, name: x.name })),
+          status: "open"
+        }, { merge: true });
       });
       await batch.commit();
       show(`Wrote ${Object.keys(queues).length} block queues for ${users.length} staff.`, "ok");
       await refresh();
     });
-
     bind("clearBtn", async () => {
       show("Clearing picks…", "warn");
       const shiftSnap = await getDocs(collection(db, "shifts"));
       const userSnap = await getDocs(collection(db, "users"));
       const batch = writeBatch(db);
-      shiftSnap.forEach((d) => batch.update(d.ref, { pickedBy: null }));
+      shiftSnap.forEach((d) => batch.update(d.ref, { pickedBy: null, pickedByName: null }));
       userSnap.forEach((d) => batch.update(d.ref, { picks: [], done: false }));
       await batch.commit();
       show("Picks cleared.", "ok");
       await refresh();
     });
-
     bind("lockBtn", async () => {
       const ref = doc(db, "settings", "global");
       const snap = await getDoc(ref);
       const locked = snap.data()?.draftLocked === true;
       await setDoc(ref, { draftLocked: !locked }, { merge: true });
       show(locked ? "Draft unlocked." : "Draft locked for non-admins.", "ok");
-      await refresh();
     });
-
-    document.getElementById("logoutBtn").onclick = async () => {
-      await signOut(auth);
-      location.href = "/index.html";
-    };
-
+    document.getElementById("logoutBtn").onclick = async () => { await signOut(auth); location.href = "/index.html"; };
     onAuthStateChanged(auth, async (user) => {
-      try {
-        if (!user) { location.replace("/index.html"); return; }
-        const snap = await getDoc(doc(db, "users", user.uid));
-        const data = snap.data() || {};
-        if (!isAdminFlag(data.isAdmin)) {
-          location.replace("/draft.html");
-          return;
-        }
-        boot.className = "flash ok";
-        boot.textContent = `Admin signed in as ${data.email || user.email}. isAdmin=${JSON.stringify(data.isAdmin)}`;
-        await refresh();
-      } catch (err) {
-        boot.className = "flash err";
-        boot.textContent = err.message || String(err);
+      if (!user) return location.replace("/index.html");
+      const snap = await getDoc(doc(db, "users", user.uid));
+      if (!isAdminFlag(snap.data()?.isAdmin)) {
+        boot.textContent = "Admin only.";
+        return;
       }
+      boot.hidden = true;
+      await refresh();
     });
   </script>
 </body>
